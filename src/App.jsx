@@ -6,6 +6,7 @@ import NodeCard from "./NodeCard.jsx";
 import ModeSelect from "./ModeSelect.jsx";
 import PermPrompt from "./PermPrompt.jsx";
 import Markdown from "./Markdown.jsx";
+import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.jsx";
 import { layoutTree } from "./layout.js";
 import { answerPermission, fetchConfig, fetchGraph, resetGraph, runTurn, setTurnAuto } from "./api.js";
 
@@ -23,6 +24,10 @@ export default function App() {
   const [inViewId, setInViewId] = useState(null);
   const [prompt, setPrompt] = useState("");
   const [reply, setReply] = useState(""); // inspector's resume field
+  // Screenshots attached to the next turn, one set per composer. Sent with the
+  // prompt, then cleared — the server writes them to a temp file it reads from.
+  const [composerImages, setComposerImages] = useState([]);
+  const [replyImages, setReplyImages] = useState([]);
   // Permission mode is per conversation, keyed by root id — each tree remembers
   // its own. `newRootMode` is the choice for the next fresh conversation.
   // Claude Code's own permission modes: default | acceptEdits | plan | dontAsk.
@@ -69,6 +74,19 @@ export default function App() {
     setPendings((ps) => ps.map((p) => (p.tempId === tempId ? fn(p) : p)));
   }, []);
 
+  // Paste a screenshot straight into a composer (Cmd/Ctrl+V). Returns a paste
+  // handler bound to one of the attachment setters; a paste that carries no
+  // image falls through untouched so text paste still works.
+  const pasteImages = useCallback(
+    (setImages) => async (e) => {
+      const imgs = await filesToImages(e.clipboardData?.files || []);
+      if (!imgs.length) return;
+      e.preventDefault();
+      setImages((prev) => [...prev, ...imgs].slice(0, MAX_IMAGES));
+    },
+    []
+  );
+
   // Aim the composer at a node so the next prompt branches off it. Forking a
   // node that already has children splits the tree — the new branch is a sibling
   // of the existing one(s).
@@ -88,8 +106,11 @@ export default function App() {
     fetchConfig().then((c) => setWorkspace(c.workspace)).catch(() => {});
   }, [refresh]);
 
-  // Clear the inspector reply when switching to a different node.
-  useEffect(() => setReply(""), [selectedId]);
+  // Clear the inspector reply (and its attachments) when switching nodes.
+  useEffect(() => {
+    setReply("");
+    setReplyImages([]);
+  }, [selectedId]);
 
   // When you pick a node (e.g. click it on the canvas), scroll the inspector to
   // that node's exchange so the thread jumps to the item you selected instead of
@@ -137,6 +158,7 @@ export default function App() {
         perms: p.perms,
         turnId: p.turnId,
         auto: p.auto,
+        images: p.images,
         streaming: true,
         order: Infinity,
       });
@@ -275,7 +297,7 @@ export default function App() {
   // Run a turn: seed (parentId null) or continue/fork from a node (parentId set).
   // Streamed, and many can run concurrently — each tracked by its own tempId.
   const startTurn = useCallback(
-    (parentId, rawText) => {
+    (parentId, rawText, images = []) => {
       const text = (rawText || "").trim();
       if (!text) return;
 
@@ -288,13 +310,13 @@ export default function App() {
       setError(null);
       setPendings((ps) => [
         ...ps,
-        { tempId, parentId, label: text, result: "", perms: [], turnId: null, auto: false },
+        { tempId, parentId, label: text, result: "", perms: [], turnId: null, auto: false, images },
       ]);
       // Follow the new branch in the chat as it streams.
       setSelectedId(tempId);
 
       const abort = runTurn(
-        { prompt: text, parentId, mode: turnMode },
+        { prompt: text, parentId, mode: turnMode, images },
         {
           onStart: (turnId) => patchPending(tempId, (p) => ({ ...p, turnId })),
           onToken: (t) => patchPending(tempId, (p) => ({ ...p, result: p.result + t })),
@@ -333,10 +355,11 @@ export default function App() {
   // Bottom composer: seed a root (nothing selected) or continue the selected node.
   const submit = useCallback(
     (parentId) => {
-      startTurn(parentId, prompt);
+      startTurn(parentId, prompt, composerImages);
       setPrompt("");
+      setComposerImages([]);
     },
-    [startTurn, prompt]
+    [startTurn, prompt, composerImages]
   );
 
   // Stop an in-flight turn: abort it (closes the stream, SIGTERMs the CLI child
@@ -364,9 +387,10 @@ export default function App() {
   // Inspector reply: continue the selected conversation from that node.
   const sendReply = useCallback(() => {
     if (!selectedId) return;
-    startTurn(selectedId, reply);
+    startTurn(selectedId, reply, replyImages);
     setReply("");
-  }, [startTurn, selectedId, reply]);
+    setReplyImages([]);
+  }, [startTurn, selectedId, reply, replyImages]);
 
   const onReset = useCallback(async () => {
     // Stop every in-flight turn (closes its stream, kills the CLI child) before
@@ -377,6 +401,8 @@ export default function App() {
     setSelectedId(null);
     setPendings([]);
     setModes({});
+    setComposerImages([]);
+    setReplyImages([]);
     await refresh();
   }, [refresh]);
 
@@ -385,6 +411,7 @@ export default function App() {
   const newConversation = useCallback(() => {
     setSelectedId(null);
     setPrompt("");
+    setComposerImages([]);
     inputRef.current?.focus();
   }, []);
 
@@ -430,6 +457,10 @@ export default function App() {
       {/* Composer: seeds the root when empty / nothing selected, else forks. */}
       <div className="composer">
         {error && <div className="error">⚠ {error}</div>}
+        <Thumbnails
+          images={composerImages}
+          onRemove={(id) => setComposerImages((p) => p.filter((img) => img.id !== id))}
+        />
         <div className="composerRow">
           <span className="target">
             {empty
@@ -443,8 +474,12 @@ export default function App() {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit(selected ? selected.id : null)}
+            onPaste={pasteImages(setComposerImages)}
             placeholder={selected ? "Ask this branch something new…" : "Start a conversation…"}
             autoFocus
+          />
+          <AttachButton
+            onAdd={(imgs) => setComposerImages((p) => [...p, ...imgs].slice(0, MAX_IMAGES))}
           />
           <ModeSelect
             value={currentMode}
@@ -494,6 +529,15 @@ export default function App() {
                 className={`exchange${n.id === selected.id ? " current" : ""}`}
               >
                 <div className="msg user">{n.prompt || <span className="muted">—</span>}</div>
+                {n.images?.length > 0 && (
+                  <div className="thumbs threadThumbs">
+                    {n.images.map((img) => (
+                      <div className="thumb" key={img.id} title={img.name}>
+                        <img src={img.dataUrl} alt={img.name} />
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="msg assistant">
                   {n.result ? (
                     <Markdown>{n.result}</Markdown>
@@ -509,6 +553,10 @@ export default function App() {
             ))}
           </div>
           <div className="resume">
+            <Thumbnails
+              images={replyImages}
+              onRemove={(id) => setReplyImages((p) => p.filter((img) => img.id !== id))}
+            />
             <textarea
               value={reply}
               onChange={(e) => setReply(e.target.value)}
@@ -518,6 +566,7 @@ export default function App() {
                   sendReply();
                 }
               }}
+              onPaste={pasteImages(setReplyImages)}
               placeholder={
                 selected.streaming ? "Streaming… reply once it finishes" : "Reply to continue this conversation…"
               }
@@ -555,9 +604,14 @@ export default function App() {
                     onChange={setCurrentMode}
                     title="Permission mode for this conversation"
                   />
-                  <button onClick={sendReply} disabled={!reply.trim()}>
-                    Send
-                  </button>
+                  <div className="resumeActions">
+                    <AttachButton
+                      onAdd={(imgs) => setReplyImages((p) => [...p, ...imgs].slice(0, MAX_IMAGES))}
+                    />
+                    <button onClick={sendReply} disabled={!reply.trim()}>
+                      Send
+                    </button>
+                  </div>
                 </>
               )}
             </div>

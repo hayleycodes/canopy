@@ -22,7 +22,7 @@ export async function resetGraph() {
 // Callbacks: onToken(text) as tokens arrive, onNode(node) when the turn lands,
 // onError(msg). Returns a function that aborts the turn — safe to call before the
 // stream has even opened.
-export function runTurn({ prompt, parentId = null, mode = "default" }, { onToken, onNode, onError, onPermission, onStart }) {
+export function runTurn({ prompt, parentId = null, mode = "default", images = [] }, { onToken, onNode, onError, onPermission, onStart }) {
   let es = null;
   let aborted = false;
 
@@ -32,7 +32,7 @@ export function runTurn({ prompt, parentId = null, mode = "default" }, { onToken
       const res = await fetch("/api/turn", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt, parentId, mode }),
+        body: JSON.stringify({ prompt, parentId, mode, images }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
