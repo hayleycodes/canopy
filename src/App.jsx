@@ -17,6 +17,10 @@ export default function App() {
   // branch — so thinking on the right never blocks talking on the left.
   const [pendings, setPendings] = useState([]); // [{ tempId, parentId, label, result, perms }]
   const [selectedId, setSelectedId] = useState(null);
+  // The node whose exchange is currently scrolled into view in the inspector —
+  // highlighted on the canvas so scrolling the thread tracks the tree. Kept
+  // separate from selectedId so it never rebuilds the thread.
+  const [inViewId, setInViewId] = useState(null);
   const [prompt, setPrompt] = useState("");
   const [reply, setReply] = useState(""); // inspector's resume field
   // Permission mode is per conversation, keyed by root id — each tree remembers
@@ -28,6 +32,7 @@ export default function App() {
   const [workspace, setWorkspace] = useState(null);
   const inputRef = useRef(null);
   const inspectorRef = useRef(null);
+  const currentRef = useRef(null); // the selected exchange in the thread
   const rfRef = useRef(null); // ReactFlow instance, for imperative fitView
   const nextTemp = useRef(0);
   // Abort fns for in-flight turns, keyed by tempId, so we can stop them (kill the
@@ -86,6 +91,29 @@ export default function App() {
   // Clear the inspector reply when switching to a different node.
   useEffect(() => setReply(""), [selectedId]);
 
+  // When you pick a node (e.g. click it on the canvas), scroll the inspector to
+  // that node's exchange so the thread jumps to the item you selected instead of
+  // leaving you wherever you'd scrolled to.
+  useEffect(() => {
+    currentRef.current?.scrollIntoView({ block: "start" });
+    setInViewId(selectedId);
+  }, [selectedId]);
+
+  // As the thread scrolls, highlight the tree node whose exchange sits at the top
+  // of the inspector — the inverse of click-to-scroll above. offsetTop is
+  // relative to the positioned .inspector, so it lines up with its scrollTop.
+  const onInspectorScroll = useCallback(() => {
+    const el = inspectorRef.current;
+    if (!el) return;
+    const marker = el.scrollTop + 100; // a little below the top edge
+    let active = null;
+    for (const ex of el.querySelectorAll(".exchange")) {
+      if (ex.offsetTop <= marker) active = ex.dataset.nodeId;
+      else break;
+    }
+    setInViewId(active);
+  }, []);
+
   // Answer a permission prompt (requestId is globally unique) and drop it from
   // whichever pending node raised it.
   const onAnswer = useCallback((requestId, behavior) => {
@@ -116,11 +144,18 @@ export default function App() {
     return list;
   }, [nodes, pendings]);
 
-  const { rfNodes, rfEdges } = useMemo(() => {
+  // Positions only depend on the tree shape, so keep the (relatively expensive)
+  // layout out of the render path that reacts to selection/highlight changes.
+  const layout = useMemo(() => {
     const pos = layoutTree(allNodes);
     // Which nodes already have a child — the ⑂ button only makes sense there,
     // where it splits off a sibling branch. A leaf is continued via the composer.
     const hasChild = new Set(allNodes.map((n) => n.parentId).filter(Boolean));
+    return { pos, hasChild };
+  }, [allNodes]);
+
+  const { rfNodes, rfEdges } = useMemo(() => {
+    const { pos, hasChild } = layout;
     const rfNodes = allNodes.map((n) => ({
       id: n.id,
       type: "canopy",
@@ -134,6 +169,8 @@ export default function App() {
         perms: n.perms || [],
         // Real node (a pending turn has no session yet) that already branched.
         canFork: !n.streaming && n.kind !== "summary" && hasChild.has(n.id),
+        // Highlighted as the thread scrolls past its exchange (but not summaries).
+        highlighted: n.id === inViewId && n.kind !== "summary",
         onAnswer,
         onFork: forkFrom,
       },
@@ -148,7 +185,7 @@ export default function App() {
         animated: n.streaming,
       }));
     return { rfNodes, rfEdges };
-  }, [allNodes, selectedId, onAnswer, forkFrom]);
+  }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom]);
 
   // The layout uses one global cursor, so starting, forking, or finishing a turn
   // — even in a different tree — reflows every tree's x-position and can slide
@@ -418,7 +455,12 @@ export default function App() {
       </div>
 
       {selected && (
-        <aside ref={inspectorRef} className="inspector" style={{ width: inspectorWidth }}>
+        <aside
+          ref={inspectorRef}
+          className="inspector"
+          style={{ width: inspectorWidth }}
+          onScroll={onInspectorScroll}
+        >
           <div className="inspectorResizer" onMouseDown={startResize} />
           <div className="inspectorHead">
             <span className="mono">{selected.streaming ? "streaming…" : selected.id.slice(0, 8)}</span>
@@ -430,6 +472,8 @@ export default function App() {
             {thread.map((n) => (
               <div
                 key={n.id}
+                ref={n.id === selected.id ? currentRef : null}
+                data-node-id={n.id}
                 className={`exchange${n.id === selected.id ? " current" : ""}`}
               >
                 <div className="msg user">{n.prompt || <span className="muted">—</span>}</div>

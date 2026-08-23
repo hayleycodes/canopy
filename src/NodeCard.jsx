@@ -6,7 +6,7 @@ import PermPrompt from "./PermPrompt.jsx";
 // requests surface here as Allow/Deny. The ⑂ button branches a new child off
 // this node — do it on a node that already has children to split the tree.
 export default function NodeCard({ data, selected }) {
-  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind } = data;
+  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted } = data;
 
   // A tree's summary header — what the whole conversation is about.
   if (kind === "summary") {
@@ -20,7 +20,7 @@ export default function NodeCard({ data, selected }) {
   }
 
   return (
-    <div className={`nodeCard${selected ? " selected" : ""}${streaming ? " streaming" : ""}`}>
+    <div className={`nodeCard${selected ? " selected" : ""}${highlighted ? " inView" : ""}${streaming ? " streaming" : ""}`}>
       <Handle type="target" position={Position.Top} />
 
       <div className="nodeHead">
