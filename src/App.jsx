@@ -223,15 +223,21 @@ export default function App() {
             patchPending(tempId, (p) => ({ ...p, perms: [...p.perms, req] })),
           onNode: async (node) => {
             aborters.current.delete(tempId);
-            setPendings((ps) => ps.filter((p) => p.tempId !== tempId));
             // A new root carries the mode chosen for it into the modes map.
             if (!parentId) setModes((m) => ({ ...m, [node.id]: newRootMode }));
+            // Bring in the real node BEFORE dropping the pending, so the selected
+            // id never briefly points at a node that no longer exists. That gap
+            // makes `selected` null for a frame, which unmounts the inspector and
+            // throws the chat scroll back to the top.
             await refresh();
-            // Hand selection from the temp id to the real node; don't steal it if
-            // you've since moved to a different branch while this one was thinking.
+            // Hand selection from the temp id to the real node, then drop the
+            // pending — batched into one render so selection is always valid.
+            // Don't steal selection if you've since moved to a different branch
+            // while this one was thinking.
             setSelectedId((cur) =>
               cur === null || cur === parentId || cur === tempId ? node.id : cur
             );
+            setPendings((ps) => ps.filter((p) => p.tempId !== tempId));
           },
           onError: (msg) => {
             aborters.current.delete(tempId);
