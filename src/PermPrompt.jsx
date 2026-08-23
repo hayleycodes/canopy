@@ -14,12 +14,12 @@ function Diff({ oldText, newText }) {
   return (
     <pre className="diff">
       {del.map((l, i) => (
-        <div key={`d${i}`} className="diff-del">
+        <div key={`d${i}`} className="diffDel">
           - {l}
         </div>
       ))}
       {add.map((l, i) => (
-        <div key={`a${i}`} className="diff-add">
+        <div key={`a${i}`} className="diffAdd">
           + {l}
         </div>
       ))}
@@ -31,7 +31,7 @@ function Preview({ toolName, input = {} }) {
   if (toolName === "Edit") {
     return (
       <>
-        {input.file_path && <div className="diff-file">{shortPath(input.file_path)}</div>}
+        {input.file_path && <div className="diffFile">{shortPath(input.file_path)}</div>}
         <Diff oldText={input.old_string} newText={input.new_string} />
       </>
     );
@@ -39,7 +39,7 @@ function Preview({ toolName, input = {} }) {
   if (toolName === "MultiEdit") {
     return (
       <>
-        {input.file_path && <div className="diff-file">{shortPath(input.file_path)}</div>}
+        {input.file_path && <div className="diffFile">{shortPath(input.file_path)}</div>}
         {(input.edits || []).map((e, i) => (
           <Diff key={i} oldText={e.old_string} newText={e.new_string} />
         ))}
@@ -49,13 +49,13 @@ function Preview({ toolName, input = {} }) {
   if (toolName === "Write") {
     return (
       <>
-        {input.file_path && <div className="diff-file">{shortPath(input.file_path)} (new content)</div>}
+        {input.file_path && <div className="diffFile">{shortPath(input.file_path)} (new content)</div>}
         <Diff newText={input.content} />
       </>
     );
   }
   if (toolName === "Bash") {
-    return <pre className="diff diff-cmd">{input.command || "(command)"}</pre>;
+    return <pre className="diff diffCmd">{input.command || "(command)"}</pre>;
   }
   const s = JSON.stringify(input, null, 2);
   return <pre className="diff">{s.length > 600 ? s.slice(0, 599) + "…" : s}</pre>;
@@ -65,11 +65,11 @@ export default function PermPrompt({ perm, onAnswer }) {
   const { requestId, tool_name, input } = perm;
   return (
     <div className="perm nodrag">
-      <div className="perm-tool">
+      <div className="permTool">
         wants to use <b>{tool_name}</b>
       </div>
       <Preview toolName={tool_name} input={input} />
-      <div className="perm-actions">
+      <div className="permActions">
         <button className="allow" onClick={() => onAnswer(requestId, "allow")}>
           Allow
         </button>

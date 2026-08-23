@@ -25,38 +25,38 @@ export default function ModeSelect({ value, onChange, title }) {
   }, [open]);
 
   return (
-    <div className="mode-select" ref={ref}>
+    <div className="modeSelect" ref={ref}>
       <button
         type="button"
-        className="mode-trigger"
+        className="modeTrigger"
         title={title}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className="mode-ico">{current.icon}</span>
-        <span className="mode-name">{current.label}</span>
-        <span className="mode-caret">▾</span>
+        <span className="modeIco">{current.icon}</span>
+        <span className="modeName">{current.label}</span>
+        <span className="modeCaret">▾</span>
       </button>
 
       {open && (
-        <div className="mode-menu" role="listbox">
+        <div className="modeMenu" role="listbox">
           {MODES.map((m) => (
             <button
               type="button"
               key={m.value}
               role="option"
               aria-selected={m.value === value}
-              className={`mode-item${m.value === value ? " selected" : ""}`}
+              className={`modeItem${m.value === value ? " selected" : ""}`}
               onClick={() => {
                 onChange(m.value);
                 setOpen(false);
               }}
             >
-              <span className="mode-ico">{m.icon}</span>
-              <span className="mode-item-text">
-                <span className="mode-item-label">{m.label}</span>
-                <span className="mode-item-desc">{m.desc}</span>
+              <span className="modeIco">{m.icon}</span>
+              <span className="modeItemText">
+                <span className="modeItemLabel">{m.label}</span>
+                <span className="modeItemDesc">{m.desc}</span>
               </span>
-              {m.value === value && <span className="mode-check">✓</span>}
+              {m.value === value && <span className="modeCheck">✓</span>}
             </button>
           ))}
         </div>

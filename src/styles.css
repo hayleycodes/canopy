@@ -76,7 +76,7 @@ body {
 }
 
 /* tree summary header node */
-.summary-card {
+.summaryCard {
   width: 220px;
   background: var(--accent);
   color: #ffffff;
@@ -84,21 +84,21 @@ body {
   padding: 10px 14px;
   box-shadow: 0 4px 14px rgba(115, 113, 252, 0.35);
 }
-.summary-eyebrow {
+.summaryEyebrow {
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.14em;
   opacity: 0.7;
   margin-bottom: 3px;
 }
-.summary-text {
+.summaryText {
   font-size: 14px;
   font-weight: 600;
   line-height: 1.3;
 }
 
 /* node cards */
-.node-card {
+.nodeCard {
   width: 220px;
   background: var(--card-solid);
   border: 1px solid var(--border);
@@ -107,26 +107,26 @@ body {
   font-size: 12px;
   box-shadow: 0 2px 10px rgba(115, 113, 252, 0.15);
 }
-.node-card.selected {
+.nodeCard.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(115, 113, 252, 0.35);
 }
-.node-card.streaming {
+.nodeCard.streaming {
   border-color: var(--accent);
   border-style: dashed;
 }
-.node-head {
+.nodeHead {
   display: flex;
   align-items: flex-start;
   gap: 6px;
   margin-bottom: 6px;
 }
-.node-label {
+.nodeLabel {
   font-weight: 600;
   line-height: 1.3;
   flex: 1;
 }
-.fork-btn {
+.forkBtn {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--border);
@@ -136,15 +136,15 @@ body {
   line-height: 1.3;
   cursor: pointer;
 }
-.fork-btn:hover {
+.forkBtn:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
-.fork-ico {
+.forkIco {
   display: inline-block;
   transform: rotate(180deg);
 }
-.node-result {
+.nodeResult {
   color: var(--muted);
   max-height: 84px;
   overflow: hidden;
@@ -164,11 +164,11 @@ body {
   background: #EDE7FB;
   border-radius: 8px;
 }
-.perm-tool {
+.permTool {
   font-size: 12px;
   color: #5b4fd6;
 }
-.diff-file {
+.diffFile {
   margin: 6px 0 4px;
   font-family: ui-monospace, "SF Mono", monospace;
   font-size: 11px;
@@ -188,27 +188,27 @@ body {
   max-height: 220px;
   overflow: auto;
 }
-.diff-del {
+.diffDel {
   background: #fbe0e6;
   color: #a12a4b;
 }
-.diff-add {
+.diffAdd {
   background: #dbf3e0;
   color: #1f7a42;
 }
-.diff-cmd {
+.diffCmd {
   background: #F5EFFF;
   color: #4a4270;
 }
-.perm-actions {
+.permActions {
   display: flex;
   gap: 6px;
 }
-.perm-actions button {
+.permActions button {
   padding: 4px 12px;
   font-size: 12px;
 }
-.perm-actions .allow {
+.permActions .allow {
   background: #7371FC;
   color: #ffffff;
 }
@@ -227,7 +227,7 @@ body {
   width: min(680px, 90vw);
   z-index: 6;
 }
-.composer-row {
+.composerRow {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -257,10 +257,10 @@ body {
   color: var(--muted);
 }
 /* themed permission-mode dropdown (replaces native <select>) */
-.mode-select {
+.modeSelect {
   position: relative;
 }
-.mode-trigger {
+.modeTrigger {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -273,15 +273,15 @@ body {
   font-weight: 600;
   cursor: pointer;
 }
-.mode-trigger:hover {
+.modeTrigger:hover {
   background: #EDE7FB;
   border-color: var(--accent);
 }
-.mode-caret {
+.modeCaret {
   color: var(--muted);
   font-size: 10px;
 }
-.mode-menu {
+.modeMenu {
   position: absolute;
   bottom: calc(100% + 6px);
   left: 0;
@@ -296,7 +296,7 @@ body {
   gap: 2px;
   z-index: 20;
 }
-.mode-item {
+.modeItem {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -310,42 +310,42 @@ body {
   cursor: pointer;
   font-weight: 500;
 }
-.mode-item:hover {
+.modeItem:hover {
   background: #F0EBFB;
   color: var(--text);
 }
-.mode-item.selected {
+.modeItem.selected {
   background: var(--accent);
   color: #ffffff;
 }
-.mode-item.selected:hover {
+.modeItem.selected:hover {
   background: var(--accent);
 }
-.mode-ico {
+.modeIco {
   font-size: 13px;
   line-height: 1.4;
   flex: 0 0 18px;
   width: 18px;
   text-align: center;
 }
-.mode-item-text {
+.modeItemText {
   display: flex;
   flex-direction: column;
   flex: 1;
 }
-.mode-item-label {
+.modeItemLabel {
   font-weight: 600;
   font-size: 13px;
 }
-.mode-item-desc {
+.modeItemDesc {
   font-size: 11px;
   opacity: 0.7;
   line-height: 1.3;
 }
-.mode-item.selected .mode-item-desc {
+.modeItem.selected .modeItemDesc {
   opacity: 0.85;
 }
-.mode-check {
+.modeCheck {
   align-self: center;
 }
 .error {
@@ -396,7 +396,7 @@ button.ghost:hover {
   overflow-y: auto;
   z-index: 6;
 }
-.inspector-resizer {
+.inspectorResizer {
   position: absolute;
   top: 0;
   left: 0;
@@ -405,11 +405,11 @@ button.ghost:hover {
   cursor: ew-resize;
   z-index: 7;
 }
-.inspector-resizer:hover {
+.inspectorResizer:hover {
   background: linear-gradient(to right, var(--accent), transparent);
   opacity: 0.5;
 }
-.inspector-head {
+.inspectorHead {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -470,6 +470,74 @@ button.ghost:hover {
   align-self: flex-start;
   max-width: 92%;
 }
+
+/* markdown inside an assistant bubble */
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+.md ul,
+.md ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+.md li {
+  margin: 2px 0;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  margin: 10px 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.md code {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 12px;
+}
+.md pre {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 0 0 8px;
+}
+.md pre code {
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+.md a {
+  color: var(--accent);
+}
+.md blockquote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.md table {
+  border-collapse: collapse;
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+.md th,
+.md td {
+  border: 1px solid var(--border);
+  padding: 3px 7px;
+}
 /* inspector resume field */
 .resume {
   margin-top: 16px;
@@ -495,7 +563,7 @@ button.ghost:hover {
 .resume textarea::placeholder {
   color: var(--muted);
 }
-.resume-controls {
+.resumeControls {
   display: flex;
   align-items: center;
   justify-content: space-between;

@@ -11,35 +11,35 @@ export default function NodeCard({ data, selected }) {
   // A tree's summary header — what the whole conversation is about.
   if (kind === "summary") {
     return (
-      <div className="summary-card">
-        <div className="summary-eyebrow">TREE</div>
-        <div className="summary-text">{label}</div>
+      <div className="summaryCard">
+        <div className="summaryEyebrow">TREE</div>
+        <div className="summaryText">{label}</div>
         <Handle type="source" position={Position.Bottom} />
       </div>
     );
   }
 
   return (
-    <div className={`node-card${selected ? " selected" : ""}${streaming ? " streaming" : ""}`}>
+    <div className={`nodeCard${selected ? " selected" : ""}${streaming ? " streaming" : ""}`}>
       <Handle type="target" position={Position.Top} />
 
-      <div className="node-head">
-        <div className="node-label">{label || "…"}</div>
+      <div className="nodeHead">
+        <div className="nodeLabel">{label || "…"}</div>
         {canFork && (
           <button
-            className="fork-btn nodrag"
+            className="forkBtn nodrag"
             title="Fork a new branch from here"
             onClick={(e) => {
               e.stopPropagation();
               onFork(id);
             }}
           >
-            <span className="fork-ico">⑂</span>
+            <span className="forkIco">⑂</span>
           </button>
         )}
       </div>
 
-      <div className="node-result">
+      <div className="nodeResult">
         {result || (streaming ? "" : <span className="muted">no reply yet</span>)}
         {streaming && <span className="cursor">▋</span>}
       </div>
