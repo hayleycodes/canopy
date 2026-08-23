@@ -28,6 +28,7 @@ export default function App() {
   const [workspace, setWorkspace] = useState(null);
   const inputRef = useRef(null);
   const inspectorRef = useRef(null);
+  const rfRef = useRef(null); // ReactFlow instance, for imperative fitView
   const nextTemp = useRef(0);
   // Abort fns for in-flight turns, keyed by tempId, so we can stop them (kill the
   // server-side stream + CLI child) on reset instead of leaving them running.
@@ -148,6 +149,23 @@ export default function App() {
       }));
     return { rfNodes, rfEdges };
   }, [allNodes, selectedId, onAnswer, forkFrom]);
+
+  // The layout uses one global cursor, so starting, forking, or finishing a turn
+  // — even in a different tree — reflows every tree's x-position and can slide
+  // the one you're looking at out of the viewport. `fitView` otherwise only runs
+  // on mount, so re-fit whenever the set of nodes changes structurally (keyed on
+  // node ids, so streamed tokens — which don't move anything — don't refit).
+  const nodeSig = rfNodes.map((n) => n.id).join(",");
+  const didInitialFit = useRef(false);
+  useEffect(() => {
+    if (!rfRef.current || !nodeSig) return;
+    // The fitView prop already handles the first paint; skip that one.
+    if (!didInitialFit.current) {
+      didInitialFit.current = true;
+      return;
+    }
+    rfRef.current.fitView({ duration: 300, padding: 0.2 });
+  }, [nodeSig]);
 
   // Selection can point at a real node or a live pending turn, so the chat can
   // follow a branch the moment it's created.
@@ -352,6 +370,7 @@ export default function App() {
           nodes={rfNodes}
           edges={rfEdges}
           nodeTypes={nodeTypes}
+          onInit={(inst) => (rfRef.current = inst)}
           onNodeClick={(_, n) => !n.id.startsWith("summary-") && setSelectedId(n.id)}
           onPaneClick={() => setSelectedId(null)}
           fitView
