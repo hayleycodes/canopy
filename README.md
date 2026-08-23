@@ -82,6 +82,25 @@ the server on `:8787`.
 Seed a conversation in the composer, click a node to open its chat, and use the
 `⑂` button (or reply in the chat) to branch.
 
+### Multiple workspaces at once
+
+One instance serves one workspace, fixed at startup. To work across several
+repos, run one instance per workspace on its own ports. Each needs a distinct
+`CANOPY_PORT` (the API server); the web port auto-increments, or set
+`CANOPY_WEB_PORT` to pin it:
+
+```bash
+# terminal 1 — project A on the defaults (api 8787, web 5173)
+CANOPY_WORKSPACE=/path/to/project-a npm run dev
+
+# terminal 2 — project B on its own ports
+CANOPY_WORKSPACE=/path/to/project-b CANOPY_PORT=8788 CANOPY_WEB_PORT=5174 npm run dev
+```
+
+Then open http://localhost:5173 for A and http://localhost:5174 for B. Each tab
+is an independent canvas over its own repo; the Vite dev server proxies `/api` to
+the matching `CANOPY_PORT`.
+
 ## Running the spikes
 
 The spikes proved the core seams before the app existed. Run them from a folder
