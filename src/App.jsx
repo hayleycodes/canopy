@@ -27,6 +27,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [workspace, setWorkspace] = useState(null);
   const inputRef = useRef(null);
+  const inspectorRef = useRef(null);
   const nextTemp = useRef(0);
   // Abort fns for in-flight turns, keyed by tempId, so we can stop them (kill the
   // server-side stream + CLI child) on reset instead of leaving them running.
@@ -149,6 +150,16 @@ export default function App() {
   // Selection can point at a real node or a live pending turn, so the chat can
   // follow a branch the moment it's created.
   const selected = allNodes.find((n) => n.id === selectedId) || null;
+
+  // Follow the stream: as tokens land on the selected node, keep the inspector
+  // pinned to the bottom — but only if you're already near it, so scrolling up
+  // to re-read something mid-stream doesn't get yanked back down.
+  useEffect(() => {
+    const el = inspectorRef.current;
+    if (!el || !selected?.streaming) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [selected?.result, selected?.streaming]);
 
   // The full conversation leading to the selected node: root → … → selected,
   // one exchange (prompt + reply) per ancestor. This is what the inspector shows
@@ -360,7 +371,7 @@ export default function App() {
       </div>
 
       {selected && (
-        <aside className="inspector" style={{ width: inspectorWidth }}>
+        <aside ref={inspectorRef} className="inspector" style={{ width: inspectorWidth }}>
           <div className="inspectorResizer" onMouseDown={startResize} />
           <div className="inspectorHead">
             <span className="mono">{selected.streaming ? "streaming…" : selected.id.slice(0, 8)}</span>
