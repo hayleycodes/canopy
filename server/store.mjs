@@ -9,9 +9,10 @@
 // messages with identical uuids — so a session is a child of whichever other
 // session's message-uuid list is the longest strict prefix of its own.
 
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { labelFor } from "./graph.mjs";
 
 const PROJECTS = join(homedir(), ".claude", "projects");
 
@@ -93,6 +94,23 @@ function parseSession(path, id) {
   return { id, msgs, uuids: msgs.map((m) => m.uuid), title, firstTs, lastTs };
 }
 
+// Reparsing every transcript on each /api/graph call (which fires after every
+// turn) is wasteful. Cache the built graph and reuse it while the directory's
+// file set and their sizes/mtimes are unchanged — a new/appended transcript
+// changes the signature and invalidates it.
+let graphCache = null; // { key, result }
+
+function dirSignature(dir, limit) {
+  const parts = readdirSync(dir)
+    .filter((f) => f.endsWith(".jsonl"))
+    .map((f) => {
+      const st = statSync(join(dir, f));
+      return `${f}:${st.size}:${st.mtimeMs}`;
+    })
+    .sort();
+  return `${dir}|${limit}|${parts.join(",")}`;
+}
+
 // Reconstruct the workspace's forest as { nodes, edges }, matching the shape the
 // in-memory graph produces so the client is unchanged. `limit` keeps only the N
 // most recently active trees (a busy day can create dozens; older ones are still
@@ -100,6 +118,12 @@ function parseSession(path, id) {
 export function loadWorkspaceGraph(workspace, limit = 5) {
   const dir = projectDir(workspace);
   if (!dir) return { nodes: [], edges: [] };
+
+  let sig = null;
+  try {
+    sig = dirSignature(dir, limit);
+    if (graphCache && graphCache.key === sig) return graphCache.result;
+  } catch {}
 
   let sessions = [];
   for (const f of readdirSync(dir)) {
@@ -164,8 +188,7 @@ export function loadWorkspaceGraph(workspace, limit = 5) {
     const lastAssistant = [...tail].reverse().find((m) => m.role === "assistant");
     // Prefer this node's own new prompt (distinctive per fork); aiTitle is
     // conversation-level and repeats across a tree's branches.
-    const clean = prompt.replace(/\s+/g, " ").trim();
-    const label = clean.slice(0, 60) || s.title || "(untitled)";
+    const label = labelFor(prompt) || s.title || "(untitled)";
     return {
       id: s.id,
       parentId: s.parentId,
@@ -221,5 +244,7 @@ export function loadWorkspaceGraph(workspace, limit = 5) {
     .filter((n) => n.parentId)
     .map((n) => ({ id: `${n.parentId}->${n.id}`, source: n.parentId, target: n.id }));
 
-  return { nodes: outNodes, edges };
+  const result = { nodes: outNodes, edges };
+  if (sig) graphCache = { key: sig, result };
+  return result;
 }

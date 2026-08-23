@@ -7,17 +7,19 @@
 // Endpoints:
 //   GET  /api/config              — server config (which workspace turns run in)
 //   GET  /api/graph               — the whole session tree as JSON
-//   GET  /api/stream?prompt&...    — run a turn (seed or fork) over SSE, live tokens
+//   POST /api/turn                — register a turn (prompt/parent/mode), get a turnId
+//   GET  /api/stream?turnId=...    — run that turn over SSE, live tokens
 //   POST /api/reset               — clear the in-memory graph
 //   POST /api/permission/ask       — (from the MCP gate) raise a prompt, block for it
 //   POST /api/permission/answer    — (from the UI) resolve a pending prompt
 //
-// A turn with no parentId seeds a root; with parentId it forks that node.
+// A turn with no parentId seeds a root; with parentId it forks that node. The
+// prompt is POSTed (not put in the SSE URL) so long prompts can't hit URL limits.
 
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { runStream } from "./engine.mjs";
+import { runStream, sweepStaleConfigs } from "./engine.mjs";
 import { addNode, getNode, snapshot, reset } from "./graph.mjs";
 import { loadWorkspaceGraph, sessionExists } from "./store.mjs";
 
@@ -26,6 +28,15 @@ const PORT = process.env.CANOPY_PORT || process.env.PORT || 8787;
 // bury the canvas (older ones stay on disk, resumable). Override with env.
 const MAX_TREES = Number(process.env.CANOPY_MAX_TREES || 5);
 
+// Permission modes Canopy will actually run a turn under. "bypassPermissions" is
+// deliberately absent — see engine.mjs — and anything else falls back to default.
+const ALLOWED_MODES = new Set(["default", "acceptEdits", "plan", "dontAsk"]);
+// How long a POSTed-but-never-streamed turn lingers before we discard it.
+const TURN_CLAIM_MS = 30_000;
+
+// Turns POSTed to /api/turn, awaiting their EventSource. Claimed (and removed)
+// by /api/stream; expired if the browser never connects.
+const queuedTurns = new Map(); // turnId -> { prompt, parentId, mode }
 // Live turns and their in-flight permission prompts. A turn's SSE stream is how
 // we raise a prompt to the human; a pending entry is the promise the MCP gate is
 // blocked on until they click. Both are keyed so answers route back correctly.
@@ -66,34 +77,46 @@ function readBody(req) {
   });
 }
 
-// Pull whatever assistant text we can out of a stream-json event. The exact
-// shape shifts across CLI versions, so we stay loose and best-effort — the
-// authoritative final text always arrives on the terminal `result` event.
+// Pull the incremental assistant text out of a stream-json event. We only read
+// the partial deltas (--include-partial-messages); the whole-message `assistant`
+// events are intentionally ignored — counting both would emit every token twice.
+// The authoritative final text still arrives on the terminal `result` event.
 function extractToken(evt) {
   // Anthropic streaming delta (content_block_delta) surfaced through the CLI.
   if (evt.type === "stream_event" && evt.event?.delta?.text) return evt.event.delta.text;
   if (evt.delta?.text) return evt.delta.text;
-  // Whole assistant message chunk.
-  const content = evt.message?.content;
-  if (Array.isArray(content)) {
-    return content.filter((c) => c.type === "text").map((c) => c.text).join("");
-  }
   return "";
 }
 
-// GET /api/stream — the workhorse. Seeds or forks, streams tokens as SSE, and on
-// completion records the new node in the graph and emits it.
-async function handleStream(req, res, url) {
-  const prompt = url.searchParams.get("prompt");
-  const parentId = url.searchParams.get("parentId") || null;
-  const mode = url.searchParams.get("mode") || "default";
-
-  if (!prompt) return sendJson(res, 400, { error: "prompt is required" });
+// POST /api/turn — register a turn's params and hand back a turnId. Validation
+// (parent exists, mode is allowed) happens here so the client gets a clean error
+// synchronously, before it opens the SSE stream.
+async function handleCreateTurn(req, res) {
+  const { prompt, parentId = null, mode = "default" } = await readBody(req);
+  if (!prompt || typeof prompt !== "string") {
+    return sendJson(res, 400, { error: "prompt is required" });
+  }
   // The parent may live only on disk (started in VS Code, or before this server
   // came up) and never entered the in-memory graph — accept either source.
   if (parentId && !getNode(parentId) && !sessionExists(WORKSPACE, parentId)) {
     return sendJson(res, 404, { error: `unknown parentId: ${parentId}` });
   }
+  const safeMode = ALLOWED_MODES.has(mode) ? mode : "default";
+  const turnId = randomUUID();
+  queuedTurns.set(turnId, { prompt, parentId, mode: safeMode });
+  // Don't leak a turn the browser never comes back to stream.
+  setTimeout(() => queuedTurns.delete(turnId), TURN_CLAIM_MS).unref?.();
+  return sendJson(res, 200, { turnId });
+}
+
+// GET /api/stream?turnId — the workhorse. Claims a queued turn, streams its
+// tokens as SSE, and on completion records the new node in the graph and emits it.
+async function handleStream(req, res, url) {
+  const turnId = url.searchParams.get("turnId");
+  const queued = turnId ? queuedTurns.get(turnId) : null;
+  if (!queued) return sendJson(res, 404, { error: "unknown or expired turn" });
+  queuedTurns.delete(turnId); // claimed — a turnId streams exactly once
+  const { prompt, parentId, mode } = queued;
 
   res.writeHead(200, {
     "content-type": "text/event-stream",
@@ -113,7 +136,6 @@ async function handleStream(req, res, url) {
   };
 
   // Register this turn so the MCP permission gate can raise prompts on it.
-  const turnId = randomUUID();
   activeTurns.set(turnId, send);
   send("start", { parentId, turnId });
 
@@ -187,8 +209,38 @@ async function handlePermissionAnswer(req, res) {
   sendJson(res, 200, { ok: true });
 }
 
+const isLocalHostname = (h) =>
+  h === "localhost" || h === "127.0.0.1" || h === "::1";
+
+// Strip the port off a Host header, handling the [::1]:port IPv6 form.
+function hostname(hostHeader = "") {
+  if (hostHeader.startsWith("[")) return hostHeader.slice(1, hostHeader.indexOf("]"));
+  return hostHeader.split(":")[0];
+}
+
+// Gate every request to genuinely-local callers. The server binds to loopback,
+// but that alone doesn't stop a page the user is visiting from scripting requests
+// at http://localhost:8787 (CSRF) or rebinding a hostname to 127.0.0.1. So:
+//   - the Host we were reached by must be loopback (blocks DNS rebinding), and
+//   - if an Origin is present (every cross-site browser request has one) it must
+//     be loopback too (blocks drive-by CSRF).
+// The MCP permission gate calls in server-to-server with no Origin — allowed.
+function localOnly(req) {
+  if (!isLocalHostname(hostname(req.headers.host))) return false;
+  const origin = req.headers.origin;
+  if (origin) {
+    try {
+      if (!isLocalHostname(new URL(origin).hostname)) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 const server = createServer(async (req, res) => {
   try {
+    if (!localOnly(req)) return sendJson(res, 403, { error: "forbidden" });
     await route(req, res);
   } catch (e) {
     // A route threw — log it and return a clean error instead of crashing the
@@ -218,6 +270,9 @@ async function route(req, res) {
       .map((n) => ({ id: `${n.parentId}->${n.id}`, source: n.parentId, target: n.id }));
     return sendJson(res, 200, { nodes, edges });
   }
+  if (req.method === "POST" && url.pathname === "/api/turn") {
+    return handleCreateTurn(req, res);
+  }
   if (req.method === "GET" && url.pathname === "/api/stream") {
     return handleStream(req, res, url);
   }
@@ -235,7 +290,12 @@ async function route(req, res) {
   sendJson(res, 404, { error: "not found" });
 }
 
-server.listen(PORT, () => {
+// Clear any per-turn MCP configs a previous crash of this port left behind.
+sweepStaleConfigs(PORT);
+
+// Bind to loopback only. Canopy drives Claude Code with the user's own auth, so
+// the API must never be reachable from other machines on the network.
+server.listen(PORT, "127.0.0.1", () => {
   console.log(`🌳 Canopy server on http://localhost:${PORT}`);
   console.log(`   workspace: ${WORKSPACE}`);
 });

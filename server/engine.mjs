@@ -12,12 +12,16 @@
 // server/permission-mcp.mjs for the other end of that bridge.
 
 import { spawn } from "node:child_process";
-import { writeFileSync, rmSync } from "node:fs";
+import { writeFileSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+// Per-turn MCP config filename. Scoped by port so a startup sweep only ever
+// touches this server instance's leftovers, never a sibling instance's.
+const cfgPathFor = (port, turnId) => join(tmpdir(), `canopy-mcp-${port}-${turnId}.json`);
 
 // Write a per-turn MCP config pointing at our stdio permission server. turnId +
 // port are handed to that subprocess via env so it can call back to the right
@@ -32,9 +36,21 @@ function writePermConfig({ turnId, port }) {
       },
     },
   };
-  const path = join(tmpdir(), `canopy-mcp-${turnId}.json`);
+  const path = cfgPathFor(port, turnId);
   writeFileSync(path, JSON.stringify(cfg));
   return path;
+}
+
+// Remove any per-turn configs this port leaked in a previous run (e.g. a crash
+// that skipped the normal cleanup). Scoped to `port` so concurrent Canopy
+// instances on other ports are left alone.
+export function sweepStaleConfigs(port) {
+  const prefix = `canopy-mcp-${port}-`;
+  try {
+    for (const f of readdirSync(tmpdir())) {
+      if (f.startsWith(prefix) && f.endsWith(".json")) rmSync(join(tmpdir(), f), { force: true });
+    }
+  } catch {}
 }
 
 // Build the argv for a single `claude` turn.
@@ -46,7 +62,8 @@ function writePermConfig({ turnId, port }) {
 //   "acceptEdits"      — Edit automatically: edits land silently; other tools hit the gate
 //   "plan"             — Plan: explore and present a plan before editing
 //   "dontAsk"          — Auto: approve safe actions, pause (via the gate) for risky ones
-//   "bypassPermissions"— allow everything, no prompts
+// "bypassPermissions" is deliberately NOT accepted: it would let a turn run every
+// tool with no gate at all, so it's never a mode Canopy will hand the CLI.
 function buildArgs(prompt, { parentId = null, mcpConfigPath = null, mode = "default", stream = false } = {}) {
   const args = ["-p", prompt];
 
@@ -59,7 +76,7 @@ function buildArgs(prompt, { parentId = null, mcpConfigPath = null, mode = "defa
   if (parentId) args.push("--resume", parentId, "--fork-session");
 
   // "default" is the CLI's own default, so we only pass the flag for the others.
-  const VALID = new Set(["acceptEdits", "plan", "dontAsk", "bypassPermissions"]);
+  const VALID = new Set(["acceptEdits", "plan", "dontAsk"]);
   if (VALID.has(mode)) args.push("--permission-mode", mode);
 
   if (mcpConfigPath) {
@@ -73,30 +90,6 @@ function buildArgs(prompt, { parentId = null, mcpConfigPath = null, mode = "defa
     );
   }
   return args;
-}
-
-// Run one turn headless. Resolves with the parsed final-result JSON:
-//   { session_id, result, ... } — see `claude -p --output-format json`.
-export function run(prompt, opts = {}) {
-  const args = buildArgs(prompt, { ...opts, stream: false });
-  return new Promise((resolve, reject) => {
-    const child = spawn("claude", args, { stdio: ["ignore", "pipe", "pipe"], cwd: opts.cwd });
-    let out = "";
-    let err = "";
-    child.stdout.on("data", (d) => (out += d));
-    child.stderr.on("data", (d) => (err += d));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) {
-        return reject(new Error(`claude exited ${code}: ${err.trim() || out.trim()}`));
-      }
-      try {
-        resolve(JSON.parse(out));
-      } catch (e) {
-        reject(new Error(`could not parse claude JSON: ${e.message}\n---\n${out}`));
-      }
-    });
-  });
 }
 
 // Run one turn streaming. `onEvent(evt)` fires for every stream-json event as it

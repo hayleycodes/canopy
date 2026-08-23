@@ -8,10 +8,16 @@
 let nodes = new Map(); // session_id -> node
 let seq = 0;
 
+// Cap the in-memory graph. Disk is the source of truth (see index.mjs), so these
+// entries only backfill just-finished turns whose .jsonl hasn't flushed yet —
+// keeping the most recent handful is plenty, and stops unbounded growth.
+const MAX_NODES = 200;
+
 // A one-line label for the canvas. The design wants a one-sentence *summary* of
 // the exchange; generating that is its own turn, so for now we fall back to the
-// prompt. Swapping in a real summarizer is a localized change here.
-function labelFor(prompt) {
+// prompt. Swapping in a real summarizer is a localized change here. Exported so
+// the disk reader (store.mjs) labels nodes identically.
+export function labelFor(prompt) {
   const clean = (prompt || "").replace(/\s+/g, " ").trim();
   return clean.length > 60 ? clean.slice(0, 59) + "…" : clean;
 }
@@ -24,21 +30,15 @@ export function addNode({ sessionId, parentId = null, prompt, result }) {
     prompt,
     label: labelFor(prompt),
     result: result ?? "",
-    createdAt: null, // Date.now() is intentionally left to the caller if needed
   };
   nodes.set(sessionId, node);
+  // Evict oldest-inserted entries once over the cap (Map keeps insertion order).
+  while (nodes.size > MAX_NODES) nodes.delete(nodes.keys().next().value);
   return node;
 }
 
 export function getNode(id) {
   return nodes.get(id) ?? null;
-}
-
-export function updateNode(id, patch) {
-  const node = nodes.get(id);
-  if (!node) return null;
-  Object.assign(node, patch);
-  return node;
 }
 
 // The whole graph as plain data for the client: flat node list + parent edges.
