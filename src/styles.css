@@ -382,6 +382,12 @@ button.ghost:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
+button.stopBtn {
+  background: #C4405A;
+}
+button.stopBtn:hover {
+  background: #D65772;
+}
 
 /* inspector */
 .inspector {

@@ -271,6 +271,16 @@ export default function App() {
     [startTurn, prompt]
   );
 
+  // Stop an in-flight turn: abort it (closes the stream, SIGTERMs the CLI child
+  // server-side), drop the pending node, and fall selection back to the branch
+  // it forked from — or deselect if it was a seeded root with no parent.
+  const stopTurn = useCallback((tempId, parentId) => {
+    aborters.current.get(tempId)?.();
+    aborters.current.delete(tempId);
+    setSelectedId((cur) => (cur === tempId ? parentId : cur));
+    setPendings((ps) => ps.filter((p) => p.tempId !== tempId));
+  }, []);
+
   // Inspector reply: continue the selected conversation from that node.
   const sendReply = useCallback(() => {
     if (!selectedId) return;
@@ -422,9 +432,18 @@ export default function App() {
                 onChange={setCurrentMode}
                 title="Permission mode for this conversation"
               />
-              <button onClick={sendReply} disabled={!reply.trim() || selected.streaming}>
-                Send
-              </button>
+              {selected.streaming ? (
+                <button
+                  className="stopBtn"
+                  onClick={() => stopTurn(selected.id, selected.parentId)}
+                >
+                  ■ stop
+                </button>
+              ) : (
+                <button onClick={sendReply} disabled={!reply.trim()}>
+                  Send
+                </button>
+              )}
             </div>
           </div>
         </aside>
