@@ -158,12 +158,28 @@ async function handleStream(req, res, url) {
   });
 
   try {
+    // Claude emits several separate text blocks across a turn (it writes, calls a
+    // tool or thinks, writes again). Their deltas would otherwise concatenate with
+    // no gap ("…then build.Now I'll…"), so when a fresh text block starts after
+    // we've already streamed some text, insert a blank line between them.
+    let emittedText = false;
     const final = await runStream(
       prompt,
       { parentId, mode, turnId, port: PORT, cwd: WORKSPACE, signal: ac.signal },
       (evt) => {
+        const inner = evt.type === "stream_event" ? evt.event : evt;
+        if (
+          inner?.type === "content_block_start" &&
+          inner.content_block?.type === "text" &&
+          emittedText
+        ) {
+          send("token", { text: "\n\n" });
+        }
         const token = extractToken(evt);
-        if (token) send("token", { text: token });
+        if (token) {
+          emittedText = true;
+          send("token", { text: token });
+        }
       }
     );
 
