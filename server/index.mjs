@@ -42,6 +42,9 @@ const queuedTurns = new Map(); // turnId -> { prompt, parentId, mode }
 // blocked on until they click. Both are keyed so answers route back correctly.
 const activeTurns = new Map(); // turnId    -> SSE `send` fn
 const pendingPerms = new Map(); // requestId -> { resolve, input, turnId }
+// Turns the human switched to auto-approve mid-flight: every permission request
+// for these is allowed without asking. Cleared when the turn ends.
+const autoApproveTurns = new Set(); // turnId
 
 // The repo every turn operates in — where forks read/edit code and where a
 // future --ide connection points. Resolve once at startup so it's unambiguous.
@@ -145,6 +148,7 @@ async function handleStream(req, res, url) {
   req.on("close", () => {
     ac.abort();
     activeTurns.delete(turnId);
+    autoApproveTurns.delete(turnId);
     for (const [id, p] of pendingPerms) {
       if (p.turnId === turnId) {
         pendingPerms.delete(id);
@@ -174,6 +178,7 @@ async function handleStream(req, res, url) {
     send("error", { message: e.message });
   } finally {
     activeTurns.delete(turnId);
+    autoApproveTurns.delete(turnId);
     res.end();
   }
 }
@@ -185,6 +190,11 @@ async function handlePermissionAsk(req, res) {
   const { turnId, requestId, tool_name, input } = await readBody(req);
   const send = activeTurns.get(turnId);
   if (!send) return sendJson(res, 200, { behavior: "deny", message: "no active turn" });
+
+  // Turn was switched to auto-approve — allow without bothering the human.
+  if (autoApproveTurns.has(turnId)) {
+    return sendJson(res, 200, { behavior: "allow", updatedInput: input ?? {} });
+  }
 
   send("permission", { requestId, tool_name, input });
 
@@ -205,6 +215,25 @@ async function handlePermissionAnswer(req, res) {
         ? { behavior: "allow", updatedInput: pend.input ?? {} }
         : { behavior: "deny", message: "Denied in Canopy" }
     );
+  }
+  sendJson(res, 200, { ok: true });
+}
+
+// POST /api/permission/auto — the UI flips a live turn to (or back from)
+// auto-approve. Turning it on also releases any prompt already waiting on the
+// human, so a turn that stalled on a manual prompt keeps moving immediately.
+async function handlePermissionAuto(req, res) {
+  const { turnId, enabled } = await readBody(req);
+  if (enabled) {
+    autoApproveTurns.add(turnId);
+    for (const [id, p] of pendingPerms) {
+      if (p.turnId === turnId) {
+        pendingPerms.delete(id);
+        p.resolve({ behavior: "allow", updatedInput: p.input ?? {} });
+      }
+    }
+  } else {
+    autoApproveTurns.delete(turnId);
   }
   sendJson(res, 200, { ok: true });
 }
@@ -285,6 +314,9 @@ async function route(req, res) {
   }
   if (req.method === "POST" && url.pathname === "/api/permission/answer") {
     return handlePermissionAnswer(req, res);
+  }
+  if (req.method === "POST" && url.pathname === "/api/permission/auto") {
+    return handlePermissionAuto(req, res);
   }
 
   sendJson(res, 404, { error: "not found" });

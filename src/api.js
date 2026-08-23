@@ -22,7 +22,7 @@ export async function resetGraph() {
 // Callbacks: onToken(text) as tokens arrive, onNode(node) when the turn lands,
 // onError(msg). Returns a function that aborts the turn — safe to call before the
 // stream has even opened.
-export function runTurn({ prompt, parentId = null, mode = "default" }, { onToken, onNode, onError, onPermission }) {
+export function runTurn({ prompt, parentId = null, mode = "default" }, { onToken, onNode, onError, onPermission, onStart }) {
   let es = null;
   let aborted = false;
 
@@ -44,6 +44,9 @@ export function runTurn({ prompt, parentId = null, mode = "default" }, { onToken
       return;
     }
     if (aborted) return; // aborted while the POST was in flight
+    // Hand the server turnId back so callers can act on the live turn (e.g.
+    // switch it to auto-approve mid-flight).
+    onStart?.(turnId);
 
     es = new EventSource(`/api/stream?turnId=${encodeURIComponent(turnId)}`);
     es.addEventListener("token", (e) => onToken?.(JSON.parse(e.data).text));
@@ -73,5 +76,15 @@ export async function answerPermission(requestId, behavior) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ requestId, behavior }),
+  });
+}
+
+// Switch a live turn to auto-approve: from now on the server allows every
+// permission request for this turn (and any already waiting) without asking.
+export async function setTurnAuto(turnId, enabled) {
+  await fetch("/api/permission/auto", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ turnId, enabled }),
   });
 }

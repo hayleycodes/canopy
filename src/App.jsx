@@ -7,7 +7,7 @@ import ModeSelect from "./ModeSelect.jsx";
 import PermPrompt from "./PermPrompt.jsx";
 import Markdown from "./Markdown.jsx";
 import { layoutTree } from "./layout.js";
-import { answerPermission, fetchConfig, fetchGraph, resetGraph, runTurn } from "./api.js";
+import { answerPermission, fetchConfig, fetchGraph, resetGraph, runTurn, setTurnAuto } from "./api.js";
 
 const nodeTypes = { canopy: NodeCard };
 
@@ -106,6 +106,8 @@ export default function App() {
         prompt: p.label,
         result: p.result,
         perms: p.perms,
+        turnId: p.turnId,
+        auto: p.auto,
         streaming: true,
         order: Infinity,
       });
@@ -222,13 +224,17 @@ export default function App() {
 
       const tempId = `pending-${nextTemp.current++}`;
       setError(null);
-      setPendings((ps) => [...ps, { tempId, parentId, label: text, result: "", perms: [] }]);
+      setPendings((ps) => [
+        ...ps,
+        { tempId, parentId, label: text, result: "", perms: [], turnId: null, auto: false },
+      ]);
       // Follow the new branch in the chat as it streams.
       setSelectedId(tempId);
 
       const abort = runTurn(
         { prompt: text, parentId, mode: turnMode },
         {
+          onStart: (turnId) => patchPending(tempId, (p) => ({ ...p, turnId })),
           onToken: (t) => patchPending(tempId, (p) => ({ ...p, result: p.result + t })),
           onPermission: (req) =>
             patchPending(tempId, (p) => ({ ...p, perms: [...p.perms, req] })),
@@ -280,6 +286,18 @@ export default function App() {
     setSelectedId((cur) => (cur === tempId ? parentId : cur));
     setPendings((ps) => ps.filter((p) => p.tempId !== tempId));
   }, []);
+
+  // Switch a live turn to auto-approve so it stops prompting for permissions —
+  // the escape hatch when you started a turn in manual mode by accident. Clears
+  // any prompts already showing, since the server has just allowed them.
+  const enableAuto = useCallback(
+    (tempId, turnId) => {
+      if (!turnId) return;
+      setTurnAuto(turnId, true);
+      patchPending(tempId, (p) => ({ ...p, auto: true, perms: [] }));
+    },
+    [patchPending]
+  );
 
   // Inspector reply: continue the selected conversation from that node.
   const sendReply = useCallback(() => {
@@ -427,22 +445,40 @@ export default function App() {
               disabled={selected.streaming}
             />
             <div className="resumeControls">
-              <ModeSelect
-                value={currentMode}
-                onChange={setCurrentMode}
-                title="Permission mode for this conversation"
-              />
               {selected.streaming ? (
-                <button
-                  className="stopBtn"
-                  onClick={() => stopTurn(selected.id, selected.parentId)}
-                >
-                  ■ stop
-                </button>
+                <>
+                  {selected.auto ? (
+                    <span className="autoOn" title="This turn approves actions automatically">
+                      ⚡ auto-approving
+                    </span>
+                  ) : (
+                    <button
+                      className="ghost"
+                      onClick={() => enableAuto(selected.id, selected.turnId)}
+                      disabled={!selected.turnId}
+                      title="Stop prompting — approve the rest of this turn's actions automatically"
+                    >
+                      ⚡ auto-approve
+                    </button>
+                  )}
+                  <button
+                    className="stopBtn"
+                    onClick={() => stopTurn(selected.id, selected.parentId)}
+                  >
+                    ■ stop
+                  </button>
+                </>
               ) : (
-                <button onClick={sendReply} disabled={!reply.trim()}>
-                  Send
-                </button>
+                <>
+                  <ModeSelect
+                    value={currentMode}
+                    onChange={setCurrentMode}
+                    title="Permission mode for this conversation"
+                  />
+                  <button onClick={sendReply} disabled={!reply.trim()}>
+                    Send
+                  </button>
+                </>
               )}
             </div>
           </div>

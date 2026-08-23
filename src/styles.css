@@ -575,6 +575,11 @@ button.stopBtn:hover {
   justify-content: space-between;
   gap: 8px;
 }
+.autoOn {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
 .mono {
   font-family: ui-monospace, "SF Mono", monospace;
   color: var(--muted);
