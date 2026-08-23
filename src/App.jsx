@@ -5,6 +5,7 @@ import "reactflow/dist/style.css";
 import NodeCard from "./NodeCard.jsx";
 import ModeSelect from "./ModeSelect.jsx";
 import PermPrompt from "./PermPrompt.jsx";
+import Markdown from "./Markdown.jsx";
 import { layoutTree } from "./layout.js";
 import { answerPermission, fetchConfig, fetchGraph, resetGraph, runTurn } from "./api.js";
 
@@ -27,6 +28,9 @@ export default function App() {
   const [workspace, setWorkspace] = useState(null);
   const inputRef = useRef(null);
   const nextTemp = useRef(0);
+  // Abort fns for in-flight turns, keyed by tempId, so we can stop them (kill the
+  // server-side stream + CLI child) on reset instead of leaving them running.
+  const aborters = useRef(new Map());
 
   // Draggable inspector width, remembered across reloads.
   const [inspectorWidth, setInspectorWidth] = useState(() => {
@@ -211,13 +215,14 @@ export default function App() {
       // Follow the new branch in the chat as it streams.
       setSelectedId(tempId);
 
-      runTurn(
+      const abort = runTurn(
         { prompt: text, parentId, mode: turnMode },
         {
           onToken: (t) => patchPending(tempId, (p) => ({ ...p, result: p.result + t })),
           onPermission: (req) =>
             patchPending(tempId, (p) => ({ ...p, perms: [...p.perms, req] })),
           onNode: async (node) => {
+            aborters.current.delete(tempId);
             setPendings((ps) => ps.filter((p) => p.tempId !== tempId));
             // A new root carries the mode chosen for it into the modes map.
             if (!parentId) setModes((m) => ({ ...m, [node.id]: newRootMode }));
@@ -229,11 +234,13 @@ export default function App() {
             );
           },
           onError: (msg) => {
+            aborters.current.delete(tempId);
             setError(msg);
             setPendings((ps) => ps.filter((p) => p.tempId !== tempId));
           },
         }
       );
+      aborters.current.set(tempId, abort);
     },
     [modes, newRootMode, rootOf, patchPending, refresh]
   );
@@ -255,6 +262,10 @@ export default function App() {
   }, [startTurn, selectedId, reply]);
 
   const onReset = useCallback(async () => {
+    // Stop every in-flight turn (closes its stream, kills the CLI child) before
+    // clearing state, so nothing keeps running server-side after a reset.
+    for (const abort of aborters.current.values()) abort();
+    aborters.current.clear();
     await resetGraph();
     setSelectedId(null);
     setPendings([]);
@@ -311,7 +322,7 @@ export default function App() {
       {/* Composer: seeds the root when empty / nothing selected, else forks. */}
       <div className="composer">
         {error && <div className="error">⚠ {error}</div>}
-        <div className="composer-row">
+        <div className="composerRow">
           <span className="target">
             {empty
               ? "seed root"
@@ -344,8 +355,8 @@ export default function App() {
 
       {selected && (
         <aside className="inspector" style={{ width: inspectorWidth }}>
-          <div className="inspector-resizer" onMouseDown={startResize} />
-          <div className="inspector-head">
+          <div className="inspectorResizer" onMouseDown={startResize} />
+          <div className="inspectorHead">
             <span className="mono">{selected.streaming ? "streaming…" : selected.id.slice(0, 8)}</span>
             <button className="ghost" onClick={() => setSelectedId(null)}>
               ✕
@@ -359,7 +370,11 @@ export default function App() {
               >
                 <div className="msg user">{n.prompt || <span className="muted">—</span>}</div>
                 <div className="msg assistant">
-                  {n.result || (n.streaming ? "" : <span className="muted">—</span>)}
+                  {n.result ? (
+                    <Markdown>{n.result}</Markdown>
+                  ) : (
+                    !n.streaming && <span className="muted">—</span>
+                  )}
                   {n.streaming && <span className="cursor">▋</span>}
                 </div>
                 {(n.perms || []).map((p) => (
@@ -384,7 +399,7 @@ export default function App() {
               rows={3}
               disabled={selected.streaming}
             />
-            <div className="resume-controls">
+            <div className="resumeControls">
               <ModeSelect
                 value={currentMode}
                 onChange={setCurrentMode}

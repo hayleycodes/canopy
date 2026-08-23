@@ -16,31 +16,55 @@ export async function resetGraph() {
   await fetch("/api/reset", { method: "POST" });
 }
 
-// Run a turn (seed if no parentId, fork otherwise) and stream it.
+// Run a turn (seed if no parentId, fork otherwise) and stream it. The prompt is
+// POSTed to register the turn (so long prompts don't hit URL limits); we then
+// open an EventSource on the returned turnId.
 // Callbacks: onToken(text) as tokens arrive, onNode(node) when the turn lands,
-// onError(msg). Returns a function that aborts the stream.
+// onError(msg). Returns a function that aborts the turn — safe to call before the
+// stream has even opened.
 export function runTurn({ prompt, parentId = null, mode = "default" }, { onToken, onNode, onError, onPermission }) {
-  const params = new URLSearchParams({ prompt });
-  if (parentId) params.set("parentId", parentId);
-  if (mode !== "default") params.set("mode", mode);
+  let es = null;
+  let aborted = false;
 
-  const es = new EventSource(`/api/stream?${params.toString()}`);
+  (async () => {
+    let turnId;
+    try {
+      const res = await fetch("/api/turn", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt, parentId, mode }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `turn ${res.status}`);
+      }
+      turnId = (await res.json()).turnId;
+    } catch (e) {
+      if (!aborted) onError?.(e.message);
+      return;
+    }
+    if (aborted) return; // aborted while the POST was in flight
 
-  es.addEventListener("token", (e) => onToken?.(JSON.parse(e.data).text));
-  es.addEventListener("permission", (e) => onPermission?.(JSON.parse(e.data)));
-  es.addEventListener("node", (e) => {
-    onNode?.(JSON.parse(e.data));
-    es.close();
-  });
-  es.addEventListener("error", (e) => {
-    // A payload means the server reported a turn error; otherwise it's a
-    // transport drop (EventSource fires a bare error on close too).
-    const msg = e.data ? JSON.parse(e.data).message : "stream disconnected";
-    onError?.(msg);
-    es.close();
-  });
+    es = new EventSource(`/api/stream?turnId=${encodeURIComponent(turnId)}`);
+    es.addEventListener("token", (e) => onToken?.(JSON.parse(e.data).text));
+    es.addEventListener("permission", (e) => onPermission?.(JSON.parse(e.data)));
+    es.addEventListener("node", (e) => {
+      onNode?.(JSON.parse(e.data));
+      es.close();
+    });
+    es.addEventListener("error", (e) => {
+      // A payload means the server reported a turn error; otherwise it's a
+      // transport drop (EventSource fires a bare error on close too).
+      const msg = e.data ? JSON.parse(e.data).message : "stream disconnected";
+      onError?.(msg);
+      es.close();
+    });
+  })();
 
-  return () => es.close();
+  return () => {
+    aborted = true;
+    es?.close();
+  };
 }
 
 // Answer a permission prompt the server raised. behavior: "allow" | "deny".
