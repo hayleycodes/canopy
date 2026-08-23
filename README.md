@@ -5,12 +5,13 @@ A visual, branching interface for Claude conversations.
 Normal chat is linear — one scroll, top to bottom. But thinking is *branchy*:
 you go down a path, hit a dead end, want to back up and try something else.
 Canopy shows every conversation as a **tree** you can pan and zoom. Fork from
-any point and watch a new branch appear. Each node is a one-sentence summary.
-And because it drives the **Claude Code** engine, any branch can edit the code
-in your open VS Code window — you drive from the tree instead of the editor.
+any node and a new branch appears. And because it drives the **Claude Code**
+engine, any branch can edit the code in your open workspace — you drive from the
+tree instead of the editor.
 
-> Status: **early spike.** The two make-or-break capabilities are verified
-> (see [DESIGN.md](./DESIGN.md)); the real app isn't built yet.
+> Status: **working prototype.** The local server + tree canvas run; you can
+> seed conversations, fork branches, stream replies, and approve edits with a
+> diff preview. See the roadmap for what's still open.
 
 ## Why it can exist
 
@@ -27,49 +28,82 @@ may not offer account login as a hosted service; a local tool you run yourself
 is fine).
 
 ```
-Browser (localhost)      the tree canvas — pan, zoom, fork, switch
+Browser (localhost:5173)   the tree canvas — pan, zoom, fork, chat, approve
+        │  /api (SSE)
+Local Node server (:8787)  reconstructs the tree from disk, shells out to the CLI
         │
-Local Node server        shells out to the Claude Code CLI, streams results back
+Claude Code CLI            carries your ACCOUNT auth (no API key). --fork-session = branch
         │
-Claude Code CLI          carries your ACCOUNT auth (no API key). --fork-session = branch
-        │
-VS Code                  spawned with --ide; edits land in your open workspace
+~/.claude/projects/…       the CLI's own session transcripts = the source of truth
 ```
 
 We build on the **CLI**, not the Agent SDK: the SDK requires an API key, the CLI
 runs on your Claude account. That single fact decides the architecture.
 
+## What it does
+
+- **Trees you can fork.** Every turn is a node; fork any node to split a branch.
+  Run several branches at once — they stream concurrently, so thinking on one
+  never blocks another.
+- **Reads from Claude Code's own store.** Canopy doesn't keep its own copy of
+  your chats — it reconstructs the fork tree straight from
+  `~/.claude/projects/<workspace>/*.jsonl` (matching branches by their shared
+  message ids). So a restart loses nothing, and conversations you started
+  outside Canopy show up too. It draws the 5 most recently active trees
+  (`CANOPY_MAX_TREES` to change).
+- **A chat panel per branch.** Click a node to read the full thread from its
+  root, reply to continue it, and watch the reply stream in. Drag the panel edge
+  to resize it.
+- **Permissions, with a diff.** Each conversation has its own permission mode
+  (Manual / Edit automatically / Plan / Auto). When a turn wants to edit a file
+  or run a command, you see the **diff** and Allow / Deny it — right in the tree.
+- **Edits your open workspace.** Turns run in a target repo and write to disk, so
+  changes show up in the VS Code window you have open on that folder.
+
 ## Requirements
 
 - **Node** (developed on v24)
 - **Claude Code CLI** installed and logged in (`claude` on your PATH)
-- **VS Code** with the Claude Code extension, for the editor-hands features
+- **VS Code** open on the target repo, for the editor-hands features
+
+## Running
+
+```bash
+npm install
+
+# Point Canopy at the repo its turns should run in, then start server + web:
+CANOPY_WORKSPACE=/path/to/your/project npm run dev
+```
+
+Open **http://localhost:5173**. (With no `CANOPY_WORKSPACE`, it uses the
+directory you launched from.) The web app is on `:5173` and proxies `/api` to
+the server on `:8787`.
+
+Seed a conversation in the composer, click a node to open its chat, and use the
+`⑂` button (or reply in the chat) to branch.
 
 ## Running the spikes
 
-The spikes prove the core seams before any UI exists.
+The spikes proved the core seams before the app existed. Run them from a folder
+VS Code currently has open:
 
 ```bash
-# 1. Forking produces a real tree (root → two divergent branches, in parallel)
-node spike.mjs
-
-# 2. A forked branch edits the workspace VS Code has open.
-#    Run this from a folder VS Code currently has open.
-node spike-ide.mjs
+node spike.mjs      # forking produces a real tree (root → two parallel branches)
+node spike-ide.mjs  # a forked branch edits the workspace VS Code has open
 ```
 
-See [DESIGN.md](./DESIGN.md) for what each spike proved — and the one thing that
-didn't work (live IDE diagnostics in headless mode).
+See [DESIGN.md](./DESIGN.md) for what each proved — and the one thing that
+didn't (live IDE diagnostics in headless mode).
 
-## Roadmap (rough)
+## Known limits
 
-- [x] Prove forking → a real session tree
-- [x] Prove a branch can edit the open VS Code workspace
-- [ ] Solve live IDE awareness (diagnostics / selection) — currently unproven
-- [ ] Generalize: fork from any node, arbitrary depth, streaming node output
-- [ ] Local server holding the session graph + a React tree canvas
-- [ ] Per-branch git worktrees for isolated parallel building
-- [ ] Merge branches back together
+- **Headless sessions aren't listed in VS Code's history panel.** They're saved
+  to the same store (resume one with `claude --resume <id>`), but the extension
+  filters out `-p`/SDK sessions by design.
+- **Write previews show the new content, not a diff against the existing file**
+  (edits show a true diff).
+- **Canopy metadata isn't persisted** — permission modes and layout live in
+  memory; only the conversations (on disk) survive a restart.
 
 ## Name
 
