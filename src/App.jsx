@@ -30,7 +30,7 @@ export default function App() {
   const [replyImages, setReplyImages] = useState([]);
   // Permission mode is per conversation, keyed by root id — each tree remembers
   // its own. `newRootMode` is the choice for the next fresh conversation.
-  // Claude Code's own permission modes: default | acceptEdits | plan | dontAsk.
+  // Claude Code's own permission modes: default | acceptEdits | plan | auto.
   const [modes, setModes] = useState({}); // rootId -> mode
   const [newRootMode, setNewRootMode] = useState("default");
   const [error, setError] = useState(null);

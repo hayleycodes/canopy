@@ -5,7 +5,7 @@ export const MODES = [
   { value: "default", label: "Manual", desc: "Ask before each action", icon: "✋" },
   { value: "acceptEdits", label: "Edit automatically", desc: "Edits apply without asking", icon: "⌁" },
   { value: "plan", label: "Plan", desc: "Explore and plan before editing", icon: "◇" },
-  { value: "dontAsk", label: "Auto", desc: "Approve safe actions, pause for risky", icon: "⚡" },
+  { value: "auto", label: "Auto", desc: "Approve safe actions, pause for risky", icon: "⚡" },
 ];
 
 // A themed replacement for a native <select> — the OS-drawn option list can't be

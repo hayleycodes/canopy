@@ -32,7 +32,7 @@ const MAX_TREES = Number(process.env.CANOPY_MAX_TREES || 5);
 
 // Permission modes Canopy will actually run a turn under. "bypassPermissions" is
 // deliberately absent — see engine.mjs — and anything else falls back to default.
-const ALLOWED_MODES = new Set(["default", "acceptEdits", "plan", "dontAsk"]);
+const ALLOWED_MODES = new Set(["default", "acceptEdits", "plan", "auto"]);
 // How long a POSTed-but-never-streamed turn lingers before we discard it.
 const TURN_CLAIM_MS = 30_000;
 

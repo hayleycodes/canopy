@@ -61,7 +61,7 @@ export function sweepStaleConfigs(port) {
 //   "default"          — Manual: prompt for every action (the gate handles all)
 //   "acceptEdits"      — Edit automatically: edits land silently; other tools hit the gate
 //   "plan"             — Plan: explore and present a plan before editing
-//   "dontAsk"          — Auto: approve safe actions, pause (via the gate) for risky ones
+//   "auto"             — Auto: a classifier approves safe actions, pausing (via the gate) for risky ones
 // "bypassPermissions" is deliberately NOT accepted: it would let a turn run every
 // tool with no gate at all, so it's never a mode Canopy will hand the CLI.
 function buildArgs(prompt, { parentId = null, mcpConfigPath = null, mode = "default", stream = false } = {}) {
@@ -76,7 +76,7 @@ function buildArgs(prompt, { parentId = null, mcpConfigPath = null, mode = "defa
   if (parentId) args.push("--resume", parentId, "--fork-session");
 
   // "default" is the CLI's own default, so we only pass the flag for the others.
-  const VALID = new Set(["acceptEdits", "plan", "dontAsk"]);
+  const VALID = new Set(["acceptEdits", "plan", "auto"]);
   if (VALID.has(mode)) args.push("--permission-mode", mode);
 
   if (mcpConfigPath) {
