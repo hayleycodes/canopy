@@ -408,16 +408,29 @@ button.stopBtn:hover {
 }
 .inspectorResizer {
   position: absolute;
-  top: 0;
-  left: 0;
+  top: 52px; /* below the topbar, matching .inspector */
   bottom: 0;
-  width: 8px;
+  width: 14px;
+  margin-right: -7px; /* straddle the seam so the grip is easy to hit */
   cursor: ew-resize;
-  z-index: 7;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.inspectorResizer:hover {
-  background: linear-gradient(to right, var(--accent), transparent);
-  opacity: 0.5;
+.inspectorGrip {
+  width: 6px;
+  height: 48px;
+  border-radius: 4px;
+  background: var(--accent);
+  opacity: 0.4;
+  box-shadow: 0 1px 4px rgba(115, 113, 252, 0.4);
+  transition: opacity 0.15s, height 0.15s;
+}
+.inspectorResizer:hover .inspectorGrip,
+.inspectorResizer:active .inspectorGrip {
+  opacity: 0.85;
+  height: 72px;
 }
 .inspectorHead {
   display: flex;

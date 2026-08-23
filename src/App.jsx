@@ -462,13 +462,23 @@ export default function App() {
       </div>
 
       {selected && (
-        <aside
-          ref={inspectorRef}
-          className="inspector"
-          style={{ width: inspectorWidth }}
-          onScroll={onInspectorScroll}
-        >
-          <div className="inspectorResizer" onMouseDown={startResize} />
+        <>
+          {/* Full-height drag handle on the inspector's left edge. Lives outside
+              the scrolling <aside> so it never scrolls out of reach. */}
+          <div
+            className="inspectorResizer"
+            style={{ right: inspectorWidth }}
+            onMouseDown={startResize}
+            title="Drag to resize"
+          >
+            <div className="inspectorGrip" />
+          </div>
+          <aside
+            ref={inspectorRef}
+            className="inspector"
+            style={{ width: inspectorWidth }}
+            onScroll={onInspectorScroll}
+          >
           <div className="inspectorHead">
             <span className="mono">{selected.streaming ? "streaming…" : selected.id.slice(0, 8)}</span>
             <button className="ghost" onClick={() => setSelectedId(null)}>
@@ -552,7 +562,8 @@ export default function App() {
               )}
             </div>
           </div>
-        </aside>
+          </aside>
+        </>
       )}
     </div>
   );
