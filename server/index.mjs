@@ -21,7 +21,7 @@ import { runStream } from "./engine.mjs";
 import { addNode, getNode, snapshot, reset } from "./graph.mjs";
 import { loadWorkspaceGraph, sessionExists } from "./store.mjs";
 
-const PORT = process.env.PORT || 8787;
+const PORT = process.env.CANOPY_PORT || process.env.PORT || 8787;
 // Show only the N most recently active trees so a busy day's conversations don't
 // bury the canvas (older ones stay on disk, resumable). Override with env.
 const MAX_TREES = Number(process.env.CANOPY_MAX_TREES || 5);
@@ -188,6 +188,18 @@ async function handlePermissionAnswer(req, res) {
 }
 
 const server = createServer(async (req, res) => {
+  try {
+    await route(req, res);
+  } catch (e) {
+    // A route threw — log it and return a clean error instead of crashing the
+    // process (Node exits on an unhandled rejection).
+    console.error(`✗ ${req.method} ${req.url}:`, e.message);
+    if (!res.headersSent) sendJson(res, 500, { error: e.message });
+    else if (!res.writableEnded) res.end();
+  }
+});
+
+async function route(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (req.method === "GET" && url.pathname === "/api/config") {
@@ -221,7 +233,7 @@ const server = createServer(async (req, res) => {
   }
 
   sendJson(res, 404, { error: "not found" });
-});
+}
 
 server.listen(PORT, () => {
   console.log(`🌳 Canopy server on http://localhost:${PORT}`);
