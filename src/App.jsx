@@ -188,21 +188,28 @@ export default function App() {
   }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom]);
 
   // The layout uses one global cursor, so starting, forking, or finishing a turn
-  // — even in a different tree — reflows every tree's x-position and can slide
-  // the one you're looking at out of the viewport. `fitView` otherwise only runs
-  // on mount, so re-fit whenever the set of nodes changes structurally (keyed on
-  // node ids, so streamed tokens — which don't move anything — don't refit).
-  const nodeSig = rfNodes.map((n) => n.id).join(",");
+  // — even in a different tree — reflows tree x-positions and can slide the one
+  // you're looking at out of the viewport. `fitView` otherwise only runs on
+  // mount, so re-fit whenever a node is added/removed OR moves. Keyed on ids +
+  // positions (not result), so streamed tokens — which move nothing — don't
+  // refit. Deferred a frame so ReactFlow has measured the changed nodes first;
+  // fitting synchronously here reads a stale node set and mis-frames the canvas.
+  const layoutSig = rfNodes
+    .map((n) => `${n.id}@${Math.round(n.position.x)},${Math.round(n.position.y)}`)
+    .join("|");
   const didInitialFit = useRef(false);
   useEffect(() => {
-    if (!rfRef.current || !nodeSig) return;
+    if (!rfRef.current || !layoutSig) return;
     // The fitView prop already handles the first paint; skip that one.
     if (!didInitialFit.current) {
       didInitialFit.current = true;
       return;
     }
-    rfRef.current.fitView({ duration: 300, padding: 0.2 });
-  }, [nodeSig]);
+    const raf = requestAnimationFrame(() =>
+      rfRef.current?.fitView({ duration: 300, padding: 0.2 })
+    );
+    return () => cancelAnimationFrame(raf);
+  }, [layoutSig]);
 
   // Selection can point at a real node or a live pending turn, so the chat can
   // follow a branch the moment it's created.
