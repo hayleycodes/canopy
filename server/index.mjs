@@ -17,8 +17,10 @@
 // prompt is POSTed (not put in the SSE URL) so long prompts can't hit URL limits.
 
 import { createServer } from "node:http";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { runStream, sweepStaleConfigs } from "./engine.mjs";
 import { addNode, getNode, snapshot, reset } from "./graph.mjs";
 import { loadWorkspaceGraph, sessionExists } from "./store.mjs";
@@ -33,6 +35,55 @@ const MAX_TREES = Number(process.env.CANOPY_MAX_TREES || 5);
 const ALLOWED_MODES = new Set(["default", "acceptEdits", "plan", "dontAsk"]);
 // How long a POSTed-but-never-streamed turn lingers before we discard it.
 const TURN_CLAIM_MS = 30_000;
+
+// Screenshots a turn may carry, and a per-image byte cap on the decoded bytes.
+// A turn's screenshots are written to its own temp dir, referenced by path in
+// the prompt (Claude reads them with the Read tool), then removed when it ends.
+const MAX_IMAGES = 6;
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+
+const shotDirFor = (turnId) => join(tmpdir(), `canopy-shots-${turnId}`);
+
+// A browser data URL -> { buffer, ext }, or null for anything that isn't a
+// base64 image data URL within the size cap (so junk is dropped, not trusted).
+function decodeImage(dataUrl) {
+  if (typeof dataUrl !== "string") return null;
+  const m = /^data:image\/([a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(dataUrl);
+  if (!m) return null;
+  const ext = m[1] === "jpeg" ? "jpg" : m[1].toLowerCase();
+  const buffer = Buffer.from(m[2], "base64");
+  if (!buffer.length || buffer.length > MAX_IMAGE_BYTES) return null;
+  return { buffer, ext };
+}
+
+// Write a turn's screenshots to its own temp dir; return their absolute paths.
+function writeTurnImages(turnId, images = []) {
+  if (!images.length) return [];
+  const dir = shotDirFor(turnId);
+  mkdirSync(dir, { recursive: true });
+  const paths = [];
+  images.forEach((img, i) => {
+    const decoded = decodeImage(img?.dataUrl);
+    if (!decoded) return;
+    const path = join(dir, `shot-${i}.${decoded.ext}`);
+    writeFileSync(path, decoded.buffer);
+    paths.push(path);
+  });
+  return paths;
+}
+
+const cleanupTurnImages = (turnId) =>
+  rmSync(shotDirFor(turnId), { recursive: true, force: true });
+
+// Point the turn at its screenshots by path so Claude reads them with the Read
+// tool. The stored node keeps the human's text; only the CLI prompt is augmented.
+function promptWithImages(prompt, paths) {
+  if (!paths.length) return prompt;
+  const noun = paths.length === 1 ? "a screenshot" : `${paths.length} screenshots`;
+  const them = paths.length === 1 ? "it" : "them";
+  const list = paths.map((p) => `- ${p}`).join("\n");
+  return `${prompt}\n\nThe user attached ${noun}. Use the Read tool to view ${them} before answering:\n${list}`;
+}
 
 // Turns POSTed to /api/turn, awaiting their EventSource. Claimed (and removed)
 // by /api/stream; expired if the browser never connects.
@@ -95,7 +146,7 @@ function extractToken(evt) {
 // (parent exists, mode is allowed) happens here so the client gets a clean error
 // synchronously, before it opens the SSE stream.
 async function handleCreateTurn(req, res) {
-  const { prompt, parentId = null, mode = "default" } = await readBody(req);
+  const { prompt, parentId = null, mode = "default", images = [] } = await readBody(req);
   if (!prompt || typeof prompt !== "string") {
     return sendJson(res, 400, { error: "prompt is required" });
   }
@@ -105,8 +156,9 @@ async function handleCreateTurn(req, res) {
     return sendJson(res, 404, { error: `unknown parentId: ${parentId}` });
   }
   const safeMode = ALLOWED_MODES.has(mode) ? mode : "default";
+  const safeImages = Array.isArray(images) ? images.slice(0, MAX_IMAGES) : [];
   const turnId = randomUUID();
-  queuedTurns.set(turnId, { prompt, parentId, mode: safeMode });
+  queuedTurns.set(turnId, { prompt, parentId, mode: safeMode, images: safeImages });
   // Don't leak a turn the browser never comes back to stream.
   setTimeout(() => queuedTurns.delete(turnId), TURN_CLAIM_MS).unref?.();
   return sendJson(res, 200, { turnId });
@@ -119,7 +171,7 @@ async function handleStream(req, res, url) {
   const queued = turnId ? queuedTurns.get(turnId) : null;
   if (!queued) return sendJson(res, 404, { error: "unknown or expired turn" });
   queuedTurns.delete(turnId); // claimed — a turnId streams exactly once
-  const { prompt, parentId, mode } = queued;
+  const { prompt, parentId, mode, images } = queued;
 
   res.writeHead(200, {
     "content-type": "text/event-stream",
@@ -163,8 +215,12 @@ async function handleStream(req, res, url) {
     // no gap ("…then build.Now I'll…"), so when a fresh text block starts after
     // we've already streamed some text, insert a blank line between them.
     let emittedText = false;
+    // Write any attached screenshots to a temp dir and point the CLI prompt at
+    // them by path; the stored node keeps the human's original text.
+    const imagePaths = writeTurnImages(turnId, images);
+    const cliPrompt = promptWithImages(prompt, imagePaths);
     const final = await runStream(
-      prompt,
+      cliPrompt,
       { parentId, mode, turnId, port: PORT, cwd: WORKSPACE, signal: ac.signal },
       (evt) => {
         const inner = evt.type === "stream_event" ? evt.event : evt;
@@ -195,6 +251,7 @@ async function handleStream(req, res, url) {
   } finally {
     activeTurns.delete(turnId);
     autoApproveTurns.delete(turnId);
+    cleanupTurnImages(turnId);
     res.end();
   }
 }
