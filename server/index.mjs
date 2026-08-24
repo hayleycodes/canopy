@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { runStream, sweepStaleConfigs } from "./engine.mjs";
 import { addNode, getNode, snapshot, reset } from "./graph.mjs";
 import { loadWorkspaceGraph, sessionExists } from "./store.mjs";
+import { loadLinks, recordLink } from "./lineage.mjs";
 
 const PORT = process.env.CANOPY_PORT || process.env.PORT || 8787;
 // Show only the N most recently active trees so a busy day's conversations don't
@@ -245,6 +246,9 @@ async function handleStream(req, res, url) {
       prompt,
       result: final.result ?? "",
     });
+    // Persist the true fork link so the tree survives compaction, which would
+    // otherwise erase the uuid prefix store.mjs uses to reconstruct lineage.
+    if (parentId) recordLink(WORKSPACE, final.session_id, parentId);
     send("node", node);
   } catch (e) {
     send("error", { message: e.message });
@@ -363,7 +367,7 @@ async function route(req, res) {
     // Disk (the CLI's own transcripts) is the source of truth, so restarts lose
     // nothing. The in-memory graph only backfills a just-finished turn whose
     // .jsonl hasn't flushed to disk yet.
-    const disk = loadWorkspaceGraph(WORKSPACE, MAX_TREES);
+    const disk = loadWorkspaceGraph(WORKSPACE, MAX_TREES, loadLinks(WORKSPACE));
     const have = new Set(disk.nodes.map((n) => n.id));
     const extra = snapshot().nodes.filter((n) => !have.has(n.id));
     const nodes = [...disk.nodes, ...extra];

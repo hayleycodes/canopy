@@ -115,13 +115,16 @@ function dirSignature(dir, limit) {
 // in-memory graph produces so the client is unchanged. `limit` keeps only the N
 // most recently active trees (a busy day can create dozens; older ones are still
 // on disk and resumable, just not drawn).
-export function loadWorkspaceGraph(workspace, limit = 5) {
+export function loadWorkspaceGraph(workspace, limit = 5, links = new Map()) {
   const dir = projectDir(workspace);
   if (!dir) return { nodes: [], edges: [] };
 
   let sig = null;
   try {
-    sig = dirSignature(dir, limit);
+    // Links repair lineage the transcripts alone can't express, so they're part
+    // of the graph's identity — fold them into the cache key alongside the files.
+    const linksSig = [...links.entries()].map(([k, v]) => `${k}:${v}`).sort().join(",");
+    sig = `${dirSignature(dir, limit)}|links:${linksSig}`;
     if (graphCache && graphCache.key === sig) return graphCache.result;
   } catch {}
 
@@ -137,7 +140,27 @@ export function loadWorkspaceGraph(workspace, limit = 5) {
   // Parent = the other session whose full uuid list is the longest strict
   // prefix of this one's.
   const isPrefix = (a, b) => a.length < b.length && a.every((u, i) => u === b[i]);
+  // How many leading uuids two sessions actually share — the real overlap even
+  // when it isn't a full prefix (a compacted fork keeps almost none of it).
+  const sharedPrefixLen = (a, b) => {
+    let i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    return i;
+  };
+  const sessById = new Map(sessions.map((s) => [s.id, s]));
   for (const s of sessions) {
+    // A fork link Canopy recorded wins over uuid-prefix inference: compaction can
+    // erase the shared prefix, but the link still knows the true parent. Only
+    // honour it when that parent is actually present in this workspace.
+    const linked = links.get(s.id);
+    if (linked && sessById.has(linked)) {
+      const parent = sessById.get(linked);
+      s.parentId = parent.id;
+      // The child may have been compacted (little or no shared prefix), so use
+      // the real overlap; 0 means the whole transcript is this node's own turn.
+      s.parentLen = sharedPrefixLen(parent.uuids, s.uuids);
+      continue;
+    }
     let parent = null;
     for (const other of sessions) {
       if (other === s) continue;
@@ -147,6 +170,22 @@ export function loadWorkspaceGraph(workspace, limit = 5) {
     }
     s.parentId = parent ? parent.id : null;
     s.parentLen = parent ? parent.uuids.length : 0;
+  }
+
+  // A corrupt links file could point a session at a descendant and form a cycle;
+  // the recursive tree walkers below would then recurse forever. Break any cycle
+  // by cutting the parent link at the point it closes back on itself.
+  for (const s of sessions) {
+    const seen = new Set();
+    let cur = s;
+    while (cur && cur.parentId) {
+      if (seen.has(cur.id)) {
+        cur.parentId = null;
+        break;
+      }
+      seen.add(cur.id);
+      cur = sessById.get(cur.parentId);
+    }
   }
 
   // Keep only the `limit` most recently active trees. A tree's activity is the
