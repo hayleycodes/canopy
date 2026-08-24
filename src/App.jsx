@@ -114,6 +114,12 @@ export default function App() {
     fetchConfig().then((c) => setWorkspace(c.workspace)).catch(() => {});
   }, [refresh]);
 
+  // Name the browser tab after the workspace so multiple instances are
+  // distinguishable at a glance.
+  useEffect(() => {
+    document.title = workspace ? `🌳 ${workspace.split("/").pop()}` : "🌳 Canopy";
+  }, [workspace]);
+
   // Clear the inspector reply (and its attachments) when switching nodes.
   useEffect(() => {
     setReply("");
