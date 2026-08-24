@@ -7,6 +7,9 @@
   --accent: #4F7A3F;
   --text: #33281B;
   --muted: #8A7A5E;
+  --error: #B23B3B;
+  --error-bg: #FBEDEA;
+  --error-border: #E0B4AC;
   color-scheme: light;
 }
 
@@ -158,6 +161,58 @@ body {
 .cursor {
   animation: blink 1s steps(2) infinite;
   color: var(--accent);
+}
+
+/* error-paste card: a stack trace someone dropped in to start a conversation */
+.nodeCard.errored {
+  border-color: var(--error-border);
+  border-left: 3px solid var(--error);
+}
+.nodeErr {
+  flex: 1;
+  min-width: 0;
+}
+.nodeErrTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.nodeErrBadge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--error);
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+.nodeErrType {
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nodeErrMsg {
+  margin-top: 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.nodeErrFrames {
+  margin-top: 5px;
+  font-size: 10px;
+  color: var(--muted);
 }
 
 /* permission prompt on a node */

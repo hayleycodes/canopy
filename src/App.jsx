@@ -8,6 +8,7 @@ import PermPrompt from "./PermPrompt.jsx";
 import Markdown from "./Markdown.jsx";
 import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.jsx";
 import { layoutTree } from "./layout.js";
+import { parseErrorPaste } from "./errorPaste.js";
 import { answerPermission, fetchConfig, fetchGraph, resetGraph, runTurn, setTurnAuto } from "./api.js";
 
 const nodeTypes = { canopy: NodeCard };
@@ -250,6 +251,9 @@ export default function App() {
         result: n.result,
         streaming: !!n.streaming,
         kind: n.kind,
+        // Detect a pasted stack trace so the card can headline the error instead
+        // of showing a meaningless truncation of the raw blob.
+        errorPaste: n.kind !== "summary" ? parseErrorPaste(n.prompt) : null,
         perms: n.perms || [],
         // Real node (a pending turn has no session yet) that already branched.
         canFork: !n.streaming && n.kind !== "summary" && hasChild.has(n.id),
