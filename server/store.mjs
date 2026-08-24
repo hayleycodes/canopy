@@ -131,7 +131,7 @@ function dirSignature(dir, limit) {
 // in-memory graph produces so the client is unchanged. `limit` keeps only the N
 // most recently active trees (a busy day can create dozens; older ones are still
 // on disk and resumable, just not drawn).
-export function loadWorkspaceGraph(workspace, limit = 5, links = new Map()) {
+export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinned = new Set()) {
   const dir = projectDir(workspace);
   if (!dir) return { nodes: [], edges: [] };
 
@@ -140,7 +140,10 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map()) {
     // Links repair lineage the transcripts alone can't express, so they're part
     // of the graph's identity — fold them into the cache key alongside the files.
     const linksSig = [...links.entries()].map(([k, v]) => `${k}:${v}`).sort().join(",");
-    sig = `${dirSignature(dir, limit)}|links:${linksSig}`;
+    // Pins change which trees survive the limit, so they're part of the identity
+    // too — toggling one must bust the cache.
+    const pinsSig = [...pinned].sort().join(",");
+    sig = `${dirSignature(dir, limit)}|links:${linksSig}|pins:${pinsSig}`;
     if (graphCache && graphCache.key === sig) return graphCache.result;
   } catch {}
 
@@ -224,6 +227,9 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map()) {
       .sort((a, b) => b.act.localeCompare(a.act))
       .slice(0, limit)
       .map((r) => r.id);
+    // Pinned trees are kept on top of the recency window, so an older pinned
+    // conversation stays on the canvas even once `limit` newer ones exist.
+    for (const r of roots) if (pinned.has(r.id) && !keepRoots.includes(r.id)) keepRoots.push(r.id);
     const keep = new Set();
     const collect = (id) => {
       keep.add(id);
@@ -291,6 +297,9 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map()) {
       prompt: "",
       result: "",
       label: treeTitle(n.id),
+      // The tree's root id and whether it's pinned, so the header can toggle it.
+      rootId: n.id,
+      pinned: pinned.has(n.id),
     });
     n.parentId = sumId; // the root now hangs beneath its summary
   }
@@ -303,4 +312,33 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map()) {
   const result = { nodes: outNodes, edges };
   if (sig) graphCache = { key: sig, result };
   return result;
+}
+
+// Give every column-root a synthetic summary header if it doesn't already have
+// one. Disk roots are summarized inside loadWorkspaceGraph; this backfills the
+// in-memory `extra` roots the /api/graph merge appends (a just-finished turn whose
+// .jsonl hasn't flushed yet), so their tree still gets a heading. Mirrors the
+// client's column rule (layout.js): a node is a column-root when it has no
+// parentId, or its parentId isn't present in the delivered set. Idempotent — a
+// root already reparented under an existing summary is skipped.
+export function attachSummaries(nodes) {
+  const ids = new Set(nodes.map((n) => n.id));
+  const summaries = [];
+  for (const n of nodes) {
+    if (n.kind === "summary") continue;
+    if (n.parentId && ids.has(n.parentId)) continue; // not a column-root
+    const sumId = `summary-${n.id}`;
+    if (ids.has(sumId)) continue; // already summarized
+    summaries.push({
+      id: sumId,
+      parentId: null,
+      kind: "summary",
+      order: n.order - 0.5,
+      prompt: "",
+      result: "",
+      label: n.label || "Conversation",
+    });
+    n.parentId = sumId; // the root now hangs beneath its summary
+  }
+  return [...summaries, ...nodes];
 }

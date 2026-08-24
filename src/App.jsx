@@ -9,7 +9,7 @@ import Markdown from "./Markdown.jsx";
 import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.jsx";
 import { layoutTree } from "./layout.js";
 import { parseErrorPaste } from "./errorPaste.js";
-import { answerPermission, fetchConfig, fetchGraph, resetGraph, runTurn, setTurnAuto } from "./api.js";
+import { answerPermission, fetchConfig, fetchGraph, resetGraph, runTurn, setPin, setTurnAuto } from "./api.js";
 
 const nodeTypes = { canopy: NodeCard };
 
@@ -122,6 +122,17 @@ export default function App() {
     setNodes(g.nodes);
   }, []);
 
+  // Pin/unpin a conversation from its summary header. A pinned tree survives the
+  // recency limit, so it stays on the canvas however old it gets. Persisted
+  // server-side, so we refresh to pick up which trees are now drawn.
+  const togglePin = useCallback(
+    async (rootId, pinned) => {
+      await setPin(rootId, pinned);
+      await refresh();
+    },
+    [refresh]
+  );
+
   useEffect(() => {
     refresh().catch((e) => setError(e.message));
     fetchConfig().then((c) => setWorkspace(c.workspace)).catch(() => {});
@@ -205,9 +216,29 @@ export default function App() {
   const allNodes = useMemo(() => {
     const list = [...nodes];
     for (const p of pendings) {
+      // A fresh root (no parent) has no persisted session yet, so the server
+      // hasn't built its summary header. Synthesize one now from the opening
+      // prompt so the green root shows immediately; the server's real summary
+      // replaces it once the session persists.
+      let parentId = p.parentId;
+      if (!parentId) {
+        parentId = `summary-${p.tempId}`;
+        list.push({
+          id: parentId,
+          parentId: null,
+          kind: "summary",
+          label: p.label,
+          rootId: p.tempId,
+          pinned: false,
+          pending: true, // not persisted yet — no pinning
+          prompt: "",
+          result: "",
+          order: Infinity,
+        });
+      }
       list.push({
         id: p.tempId,
-        parentId: p.parentId,
+        parentId,
         label: p.label,
         prompt: p.label,
         result: p.result,
@@ -251,6 +282,13 @@ export default function App() {
         result: n.result,
         streaming: !!n.streaming,
         kind: n.kind,
+        // Summary headers carry their tree's root id + pin state, so the header
+        // can toggle whether this conversation stays on the canvas.
+        rootId: n.rootId,
+        pinned: n.pinned,
+        // A synthetic header for a still-streaming root can't be pinned yet.
+        pending: n.pending,
+        onTogglePin: togglePin,
         // Detect a pasted stack trace so the card can headline the error instead
         // of showing a meaningless truncation of the raw blob.
         errorPaste: n.kind !== "summary" ? parseErrorPaste(n.prompt) : null,
@@ -274,7 +312,7 @@ export default function App() {
         animated: n.streaming,
       }));
     return { rfNodes, rfEdges };
-  }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom, dims]);
+  }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom, togglePin, dims]);
 
   // Camera: frame the canvas once, on the initial load, via ReactFlow's own
   // `fitView` prop — and then never move it automatically again. Every automatic

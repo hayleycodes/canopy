@@ -80,12 +80,43 @@ body {
 
 /* tree summary header node */
 .summaryCard {
+  position: relative;
   width: 220px;
   background: var(--accent);
   color: #ffffff;
   border-radius: 12px;
   padding: 10px 14px;
   box-shadow: 0 4px 14px rgba(79, 122, 63, 0.35);
+}
+.summaryCard.pinned {
+  box-shadow: 0 0 0 2px #C9A227, 0 4px 14px rgba(79, 122, 63, 0.35);
+}
+/* Pin toggle in the header's top-right. Faint until hovered or already on. */
+.pinBtn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px;
+  border-radius: 6px;
+  opacity: 0.35;
+  filter: grayscale(1);
+  transition: opacity 0.12s, filter 0.12s;
+}
+.summaryCard:hover .pinBtn {
+  opacity: 0.7;
+}
+.pinBtn.on {
+  opacity: 1;
+  filter: none;
+}
+.pinBtn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.18);
 }
 .summaryEyebrow {
   font-size: 9px;

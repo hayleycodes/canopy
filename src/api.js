@@ -81,6 +81,16 @@ export async function answerPermission(requestId, behavior, updatedInput) {
   });
 }
 
+// Pin or unpin a conversation by its root id. A pinned tree stays on the canvas
+// even after MAX_TREES newer conversations would otherwise push it off.
+export async function setPin(rootId, pinned) {
+  await fetch("/api/pin", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ rootId, pinned }),
+  });
+}
+
 // Switch a live turn to auto-approve: from now on the server allows every
 // permission request for this turn (and any already waiting) without asking.
 export async function setTurnAuto(turnId, enabled) {
