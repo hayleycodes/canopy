@@ -47,6 +47,13 @@ export default function App() {
   });
   const [error, setError] = useState(null);
   const [workspace, setWorkspace] = useState(null);
+  // React Flow measures each node's size with a ResizeObserver and keeps it in
+  // its OWN store — but it drops those dimensions every time the `nodes` prop is
+  // rebuilt (see createNodeInternals). Since we rebuild `rfNodes` on every token,
+  // an un-measured node renders `visibility:hidden` and vanishes. We cache the
+  // measured size here (fed by onNodesChange) and merge it back onto each node so
+  // rebuilt nodes stay "initialized" and visible. Keyed by node id.
+  const [dims, setDims] = useState(() => new Map());
   const inputRef = useRef(null);
   const replyRef = useRef(null); // inspector's composer, focused for a new conversation
   const inspectorRef = useRef(null);
@@ -172,6 +179,26 @@ export default function App() {
     );
   }, []);
 
+  // Persist React Flow's own dimension measurements. We only apply "dimensions"
+  // changes (position/selection stay driven by our layout + `selected` field);
+  // this is what keeps a rebuilt node carrying its width/height so it doesn't
+  // flip to visibility:hidden mid-stream. Only re-render when a size truly
+  // changed, so this never loops against the re-measure.
+  const onNodesChange = useCallback((changes) => {
+    setDims((prev) => {
+      let next = null;
+      for (const c of changes) {
+        if (c.type !== "dimensions" || !c.dimensions) continue;
+        const { width, height } = c.dimensions;
+        const cur = prev.get(c.id);
+        if (cur && cur.width === width && cur.height === height) continue;
+        if (!next) next = new Map(prev);
+        next.set(c.id, { width, height });
+      }
+      return next || prev;
+    });
+  }, []);
+
   // Merge every live pending turn into the set we lay out, so each streaming
   // branch appears immediately, in place, before its real session_id exists.
   const allNodes = useMemo(() => {
@@ -214,6 +241,9 @@ export default function App() {
       id: n.id,
       type: "canopy",
       position: pos.get(n.id) || { x: 0, y: 0 },
+      // Carry the last measured size so React Flow keeps this node "initialized"
+      // (and visible) even though we hand it a brand-new object every render.
+      ...(dims.get(n.id) || {}),
       data: {
         id: n.id,
         label: n.label,
@@ -239,7 +269,7 @@ export default function App() {
         animated: n.streaming,
       }));
     return { rfNodes, rfEdges };
-  }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom]);
+  }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom, dims]);
 
   // Camera: frame the canvas once, on the initial load, via ReactFlow's own
   // `fitView` prop — and then never move it automatically again. Every automatic
@@ -469,6 +499,7 @@ export default function App() {
           nodes={rfNodes}
           edges={rfEdges}
           nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
           onInit={(inst) => (rfRef.current = inst)}
           onNodeClick={(_, n) => !n.id.startsWith("summary-") && setSelectedId(n.id)}
           onPaneClick={() => {
