@@ -18,6 +18,10 @@ export default function App() {
   // branch — so thinking on the right never blocks talking on the left.
   const [pendings, setPendings] = useState([]); // [{ tempId, parentId, label, result, perms }]
   const [selectedId, setSelectedId] = useState(null);
+  // Opens the inspector on the right in an empty "new conversation" state — no
+  // node selected yet, its composer seeds a fresh root. Cleared as soon as a real
+  // node is selected (including the one the seeded turn creates).
+  const [composingNew, setComposingNew] = useState(false);
   // The node whose exchange is currently scrolled into view in the inspector —
   // highlighted on the canvas so scrolling the thread tracks the tree. Kept
   // separate from selectedId so it never rebuilds the thread.
@@ -44,6 +48,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [workspace, setWorkspace] = useState(null);
   const inputRef = useRef(null);
+  const replyRef = useRef(null); // inspector's composer, focused for a new conversation
   const inspectorRef = useRef(null);
   const currentRef = useRef(null); // the selected exchange in the thread
   const rfRef = useRef(null); // ReactFlow instance, for imperative fitView
@@ -120,11 +125,20 @@ export default function App() {
     document.title = workspace ? `🌳 ${workspace.split("/").pop()}` : "🌳 Canopy";
   }, [workspace]);
 
-  // Clear the inspector reply (and its attachments) when switching nodes.
+  // Clear the inspector reply (and its attachments) when switching nodes. Picking
+  // a real node also drops the "new conversation" state — that node's thread takes
+  // over the inspector (including the node a seeded turn just created).
   useEffect(() => {
     setReply("");
     setReplyImages([]);
+    if (selectedId) setComposingNew(false);
   }, [selectedId]);
+
+  // Focus the inspector's composer when a new conversation opens, so you can type
+  // straight into the chat window on the right.
+  useEffect(() => {
+    if (composingNew) replyRef.current?.focus();
+  }, [composingNew]);
 
   // When you pick a node (e.g. click it on the canvas), scroll the inspector to
   // that node's exchange so the thread jumps to the item you selected instead of
@@ -180,10 +194,14 @@ export default function App() {
     return list;
   }, [nodes, pendings]);
 
+  // Persistent per-tree horizontal slots, so a tree keeps its x position across
+  // renders and forking one tree never shifts another.
+  const treeSlots = useRef(new Map());
+
   // Positions only depend on the tree shape, so keep the (relatively expensive)
   // layout out of the render path that reacts to selection/highlight changes.
   const layout = useMemo(() => {
-    const pos = layoutTree(allNodes);
+    const pos = layoutTree(allNodes, treeSlots.current);
     // Which nodes already have a child — the ⑂ button only makes sense there,
     // where it splits off a sibling branch. A leaf is continued via the composer.
     const hasChild = new Set(allNodes.map((n) => n.parentId).filter(Boolean));
@@ -223,41 +241,15 @@ export default function App() {
     return { rfNodes, rfEdges };
   }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom]);
 
-  // The layout uses one global cursor, so starting, forking, or finishing a turn
-  // — even in a different tree — reflows tree x-positions and can slide the one
-  // you're looking at out of the viewport. `fitView` otherwise only runs on
-  // mount, so re-fit whenever a node is added/removed OR moves. Keyed on ids +
-  // positions (not result), so streamed tokens — which move nothing — don't
-  // refit. Deferred a frame so ReactFlow has measured the changed nodes first;
-  // fitting synchronously here reads a stale node set and mis-frames the canvas.
-  const layoutSig = rfNodes
-    .map((n) => `${n.id}@${Math.round(n.position.x)},${Math.round(n.position.y)}`)
-    .join("|");
-  const didInitialFit = useRef(false);
-  useEffect(() => {
-    if (!rfRef.current || !layoutSig) return;
-    // The fitView prop already handles the first paint; skip that one.
-    if (!didInitialFit.current) {
-      didInitialFit.current = true;
-      return;
-    }
-    // fitView is a no-op until EVERY node is measured (it checks
-    // `nodes.every(n => n.width && n.height)` and bails otherwise). A newly
-    // added node is measured asynchronously by ReactFlow's ResizeObserver, which
-    // often hasn't run by the next frame — so a single rAF silently fails and,
-    // because the layout cursor already reflowed every tree's x, leaves the tree
-    // you were viewing slid off-screen. Retry each frame until fitView reports
-    // success (returns true), capped so a genuinely empty/unmeasurable canvas
-    // can't spin forever.
-    let raf;
-    let tries = 0;
-    const attempt = () => {
-      const ok = rfRef.current?.fitView({ duration: 300, padding: 0.2 });
-      if (!ok && ++tries < 60) raf = requestAnimationFrame(attempt);
-    };
-    raf = requestAnimationFrame(attempt);
-    return () => cancelAnimationFrame(raf);
-  }, [layoutSig]);
+  // Camera: frame the canvas once, on the initial load, via ReactFlow's own
+  // `fitView` prop — and then never move it automatically again. Every automatic
+  // re-fit we tried caused a worse problem: fitting the whole forest on each turn
+  // mis-framed it into a "collapsed to one node" view (fitView bails until every
+  // node is measured), fitting just the current tree hid all the other trees, and
+  // pinning a node let the layout slide out from under it. Leaving the viewport
+  // alone is safe now that the layout is stable (see layout.js): each tree keeps a
+  // fixed horizontal slot, so forking one never moves another. Pan and zoom with
+  // the mouse or the Controls' fit button whenever you want to reframe.
 
   // Selection can point at a real node or a live pending turn, so the chat can
   // follow a branch the moment it's created.
@@ -416,13 +408,15 @@ export default function App() {
     [patchPending]
   );
 
-  // Inspector reply: continue the selected conversation from that node.
+  // Inspector composer: continue the selected conversation from that node, or —
+  // when the inspector is open for a new conversation — seed a fresh root.
   const sendReply = useCallback(() => {
-    if (!selectedId) return;
-    startTurn(selectedId, reply, replyImages);
+    if (selectedId) startTurn(selectedId, reply, replyImages);
+    else if (composingNew) startTurn(null, reply, replyImages);
+    else return;
     setReply("");
     setReplyImages([]);
-  }, [startTurn, selectedId, reply, replyImages]);
+  }, [startTurn, selectedId, composingNew, reply, replyImages]);
 
   const onReset = useCallback(async () => {
     // Stop every in-flight turn (closes its stream, kills the CLI child) before
@@ -438,13 +432,15 @@ export default function App() {
     await refresh();
   }, [refresh]);
 
-  // Start a fresh conversation: deselect so the composer seeds a NEW root tree
-  // (multiple roots live side by side on the canvas), and focus the input.
+  // Start a fresh conversation: open the inspector on the right in its empty
+  // "new conversation" state (deselect any node so its composer seeds a NEW root
+  // tree — multiple roots live side by side on the canvas). The focus effect
+  // above puts the cursor in the inspector's composer.
   const newConversation = useCallback(() => {
     setSelectedId(null);
+    setComposingNew(true);
     setPrompt("");
     setComposerImages([]);
-    inputRef.current?.focus();
   }, []);
 
 
@@ -475,7 +471,10 @@ export default function App() {
           nodeTypes={nodeTypes}
           onInit={(inst) => (rfRef.current = inst)}
           onNodeClick={(_, n) => !n.id.startsWith("summary-") && setSelectedId(n.id)}
-          onPaneClick={() => setSelectedId(null)}
+          onPaneClick={() => {
+            setSelectedId(null);
+            setComposingNew(false);
+          }}
           fitView
           minZoom={0.15}
           proOptions={{ hideAttribution: true }}
@@ -528,7 +527,7 @@ export default function App() {
         </div>
       </div>
 
-      {selected && (
+      {(selected || composingNew) && (
         <>
           {/* Full-height drag handle on the inspector's left edge. Lives outside
               the scrolling <aside> so it never scrolls out of reach. */}
@@ -547,12 +546,25 @@ export default function App() {
             onScroll={onInspectorScroll}
           >
           <div className="inspectorHead">
-            <span className="mono">{selected.streaming ? "streaming…" : selected.id.slice(0, 8)}</span>
-            <button className="ghost" onClick={() => setSelectedId(null)}>
+            <span className="mono">
+              {selected ? (selected.streaming ? "streaming…" : selected.id.slice(0, 8)) : "new conversation"}
+            </span>
+            <button
+              className="ghost"
+              onClick={() => {
+                setSelectedId(null);
+                setComposingNew(false);
+              }}
+            >
               ✕
             </button>
           </div>
           <div className="thread">
+            {thread.length === 0 && (
+              <div className="muted" style={{ padding: "8px 4px" }}>
+                Ask anything to start a new conversation.
+              </div>
+            )}
             {thread.map((n) => (
               <div
                 key={n.id}
@@ -590,6 +602,7 @@ export default function App() {
               onRemove={(id) => setReplyImages((p) => p.filter((img) => img.id !== id))}
             />
             <textarea
+              ref={replyRef}
               value={reply}
               onChange={(e) => setReply(e.target.value)}
               onKeyDown={(e) => {
@@ -600,13 +613,17 @@ export default function App() {
               }}
               onPaste={pasteImages(setReplyImages)}
               placeholder={
-                selected.streaming ? "Streaming… reply once it finishes" : "Reply to continue this conversation…"
+                !selected
+                  ? "Ask anything to start a new conversation…"
+                  : selected.streaming
+                    ? "Streaming… reply once it finishes"
+                    : "Reply to continue this conversation…"
               }
               rows={3}
-              disabled={selected.streaming}
+              disabled={!!selected?.streaming}
             />
             <div className="resumeControls">
-              {selected.streaming ? (
+              {selected?.streaming ? (
                 <>
                   {selected.auto ? (
                     <span className="autoOn" title="This turn approves actions automatically">
