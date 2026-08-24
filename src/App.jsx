@@ -32,7 +32,15 @@ export default function App() {
   // its own. `newRootMode` is the choice for the next fresh conversation.
   // Claude Code's own permission modes: default | acceptEdits | plan | auto.
   const [modes, setModes] = useState({}); // rootId -> mode
-  const [newRootMode, setNewRootMode] = useState("default");
+  // A fresh conversation defaults to whatever the last one used, remembered
+  // across reloads.
+  const [newRootMode, setNewRootMode] = useState(() => {
+    try {
+      return localStorage.getItem("canopy.newRootMode") || "default";
+    } catch {
+      return "default";
+    }
+  });
   const [error, setError] = useState(null);
   const [workspace, setWorkspace] = useState(null);
   const inputRef = useRef(null);
@@ -227,9 +235,21 @@ export default function App() {
       didInitialFit.current = true;
       return;
     }
-    const raf = requestAnimationFrame(() =>
-      rfRef.current?.fitView({ duration: 300, padding: 0.2 })
-    );
+    // fitView is a no-op until EVERY node is measured (it checks
+    // `nodes.every(n => n.width && n.height)` and bails otherwise). A newly
+    // added node is measured asynchronously by ReactFlow's ResizeObserver, which
+    // often hasn't run by the next frame — so a single rAF silently fails and,
+    // because the layout cursor already reflowed every tree's x, leaves the tree
+    // you were viewing slid off-screen. Retry each frame until fitView reports
+    // success (returns true), capped so a genuinely empty/unmeasurable canvas
+    // can't spin forever.
+    let raf;
+    let tries = 0;
+    const attempt = () => {
+      const ok = rfRef.current?.fitView({ duration: 300, padding: 0.2 });
+      if (!ok && ++tries < 60) raf = requestAnimationFrame(attempt);
+    };
+    raf = requestAnimationFrame(attempt);
     return () => cancelAnimationFrame(raf);
   }, [layoutSig]);
 
@@ -305,6 +325,12 @@ export default function App() {
       // mode, or the chosen mode for a brand-new root.
       const root = parentId ? rootOf(parentId) : null;
       const turnMode = root ? modes[root] ?? "default" : newRootMode;
+
+      // Remember this turn's mode as the default for the next fresh conversation.
+      setNewRootMode(turnMode);
+      try {
+        localStorage.setItem("canopy.newRootMode", turnMode);
+      } catch {}
 
       const tempId = `pending-${nextTemp.current++}`;
       setError(null);
