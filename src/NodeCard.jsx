@@ -1,12 +1,19 @@
 import { Handle, Position } from "reactflow";
 import PermPrompt from "./PermPrompt.jsx";
 
+// Compact token count: 950 → "950", 1200 → "1.2k", 47000 → "47k".
+function fmtTokens(n) {
+  if (n < 1000) return String(n);
+  const k = n / 1000;
+  return (k >= 10 ? Math.round(k) : Math.round(k * 10) / 10) + "k";
+}
+
 // One node on the canvas: a card with the prompt as its title and a preview of
 // the reply. `streaming` nodes show a live cursor; any pending permission
 // requests surface here as Allow/Deny. The ⑂ button branches a new child off
 // this node — do it on a node that already has children to split the tree.
 export default function NodeCard({ data, selected }) {
-  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted, errorPaste } = data;
+  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted, errorPaste, tokens } = data;
 
   // A tree's summary header — what the whole conversation is about.
   if (kind === "summary") {
@@ -62,6 +69,16 @@ export default function NodeCard({ data, selected }) {
       {perms.map((p) => (
         <PermPrompt key={p.requestId} perm={p} onAnswer={onAnswer} />
       ))}
+
+      {tokens && (
+        <div
+          className="nodeTokens"
+          title={`Context sent this turn: ${tokens.context.toLocaleString()} tokens\nGenerated this turn: ${tokens.output.toLocaleString()} tokens`}
+        >
+          <span className="tok">◐ {fmtTokens(tokens.context)} ctx</span>
+          <span className="tok">↓ {fmtTokens(tokens.output)}</span>
+        </div>
+      )}
 
       <Handle type="source" position={Position.Bottom} />
     </div>

@@ -245,6 +245,7 @@ async function handleStream(req, res, url) {
       parentId,
       prompt,
       result: final.result ?? "",
+      usage: final.usage,
     });
     // Persist the true fork link so the tree survives compaction, which would
     // otherwise erase the uuid prefix store.mjs uses to reconstruct lineage.

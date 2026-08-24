@@ -254,6 +254,7 @@ export default function App() {
         // Detect a pasted stack trace so the card can headline the error instead
         // of showing a meaningless truncation of the raw blob.
         errorPaste: n.kind !== "summary" ? parseErrorPaste(n.prompt) : null,
+        tokens: n.tokens,
         perms: n.perms || [],
         // Real node (a pending turn has no session yet) that already branched.
         canFork: !n.streaming && n.kind !== "summary" && hasChild.has(n.id),

@@ -22,7 +22,19 @@ export function labelFor(prompt) {
   return clean.length > 60 ? clean.slice(0, 59) + "…" : clean;
 }
 
-export function addNode({ sessionId, parentId = null, prompt, result }) {
+// Context/output for the just-finished turn, from the CLI's final result usage
+// (same shape as a transcript message's usage). Mirrors store.tokensForTail so a
+// live node and its later disk-reconstructed twin read identically.
+function tokensFromUsage(u) {
+  if (!u) return null;
+  const context =
+    (u.input_tokens || 0) +
+    (u.cache_creation_input_tokens || 0) +
+    (u.cache_read_input_tokens || 0);
+  return { context, output: u.output_tokens || 0 };
+}
+
+export function addNode({ sessionId, parentId = null, prompt, result, usage = null }) {
   const node = {
     id: sessionId,
     parentId,
@@ -30,6 +42,7 @@ export function addNode({ sessionId, parentId = null, prompt, result }) {
     prompt,
     label: labelFor(prompt),
     result: result ?? "",
+    tokens: tokensFromUsage(usage),
   };
   nodes.set(sessionId, node);
   // Evict oldest-inserted entries once over the cap (Map keeps insertion order).

@@ -163,6 +163,21 @@ body {
   color: var(--accent);
 }
 
+/* per-node token usage: context sent this turn + tokens generated */
+.nodeTokens {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.nodeTokens .tok {
+  white-space: nowrap;
+}
+
 /* error-paste card: a stack trace someone dropped in to start a conversation */
 .nodeCard.errored {
   border-color: var(--error-border);

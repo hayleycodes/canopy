@@ -68,6 +68,22 @@ function textOf(message) {
   return "";
 }
 
+// Token usage for a node's own turn (the tail after its parent's shared prefix).
+// `context` is the whole prompt the model saw on this turn's LAST response —
+// input + both cache tiers = system + tools + full history so far, i.e. how full
+// the window is at this node. `output` is what it generated across the turn.
+export function tokensForTail(tail) {
+  const used = tail.filter((m) => m.role === "assistant" && m.usage);
+  if (!used.length) return null;
+  const last = used[used.length - 1].usage;
+  const context =
+    (last.input_tokens || 0) +
+    (last.cache_creation_input_tokens || 0) +
+    (last.cache_read_input_tokens || 0);
+  const output = used.reduce((n, m) => n + (m.usage.output_tokens || 0), 0);
+  return { context, output };
+}
+
 // Parse one transcript into the bits we need to place it in the tree.
 function parseSession(path, id) {
   const msgs = []; // ordered main-chain messages: { uuid, role, text }
@@ -88,7 +104,7 @@ function parseSession(path, id) {
     }
     if (d.type === "ai-title" && d.aiTitle) title = d.aiTitle;
     if ((d.type === "user" || d.type === "assistant") && d.uuid && !d.isSidechain) {
-      msgs.push({ uuid: d.uuid, role: d.type, text: textOf(d.message) });
+      msgs.push({ uuid: d.uuid, role: d.type, text: textOf(d.message), usage: d.message?.usage || null });
     }
   }
   return { id, msgs, uuids: msgs.map((m) => m.uuid), title, firstTs, lastTs };
@@ -235,6 +251,7 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map()) {
       prompt,
       label,
       result: lastAssistant?.text || "",
+      tokens: tokensForTail(tail),
     };
   });
 
