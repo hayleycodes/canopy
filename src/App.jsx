@@ -481,7 +481,7 @@ export default function App() {
           proOptions={{ hideAttribution: true }}
         >
           <Background gap={24} color="#CDC1FF" />
-          <MiniMap pannable zoomable nodeColor="#A594F9" maskColor="rgba(229,217,242,0.6)" />
+          <MiniMap pannable zoomable nodeColor="#6E9E5B" maskColor="rgba(221,230,207,0.6)" />
           <Controls />
         </ReactFlow>
       </div>
