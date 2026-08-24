@@ -279,13 +279,13 @@ async function handlePermissionAsk(req, res) {
 
 // POST /api/permission/answer — the UI's Allow/Deny click lands here.
 async function handlePermissionAnswer(req, res) {
-  const { requestId, behavior } = await readBody(req);
+  const { requestId, behavior, updatedInput } = await readBody(req);
   const pend = pendingPerms.get(requestId);
   if (pend) {
     pendingPerms.delete(requestId);
     pend.resolve(
       behavior === "allow"
-        ? { behavior: "allow", updatedInput: pend.input ?? {} }
+        ? { behavior: "allow", updatedInput: updatedInput ?? pend.input ?? {} }
         : { behavior: "deny", message: "Denied in Canopy" }
     );
   }

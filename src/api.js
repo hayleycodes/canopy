@@ -71,11 +71,13 @@ export function runTurn({ prompt, parentId = null, mode = "default", images = []
 }
 
 // Answer a permission prompt the server raised. behavior: "allow" | "deny".
-export async function answerPermission(requestId, behavior) {
+// updatedInput (optional) overrides the tool input on allow — used by
+// AskUserQuestion to feed the human's picks back as the tool's answers.
+export async function answerPermission(requestId, behavior, updatedInput) {
   await fetch("/api/permission/answer", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ requestId, behavior }),
+    body: JSON.stringify({ requestId, behavior, updatedInput }),
   });
 }
 

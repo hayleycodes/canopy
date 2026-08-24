@@ -2,6 +2,8 @@
 // edits, the content for writes, the command for Bash — so you can see it before
 // approving, like the VS Code diff panel. The request input carries all of this.
 
+import { useState } from "react";
+
 function shortPath(p) {
   if (!p) return "";
   const parts = p.split("/");
@@ -61,8 +63,79 @@ function Preview({ toolName, input = {} }) {
   return <pre className="diff">{s.length > 600 ? s.slice(0, 599) + "…" : s}</pre>;
 }
 
+// AskUserQuestion isn't an allow/deny gate — it's the agent asking the human to
+// pick from options. We render each question with its choices and feed the picks
+// back as the tool's `answers` (keyed by question text), which is what the CLI
+// reads from updatedInput to produce the tool result.
+function QuestionPrompt({ requestId, input, onAnswer }) {
+  const questions = input?.questions || [];
+  // selections[i] is a Set of chosen labels for question i.
+  const [selections, setSelections] = useState(() => questions.map(() => new Set()));
+
+  const toggle = (qi, label, multi) => {
+    setSelections((prev) =>
+      prev.map((set, i) => {
+        if (i !== qi) return set;
+        const next = new Set(multi ? set : []);
+        if (set.has(label)) next.delete(label);
+        else next.add(label);
+        return next;
+      })
+    );
+  };
+
+  const ready = questions.every((_, i) => selections[i].size > 0);
+
+  const submit = () => {
+    const answers = {};
+    questions.forEach((q, i) => {
+      answers[q.question] = [...selections[i]].join(", ");
+    });
+    onAnswer(requestId, "allow", { ...input, answers });
+  };
+
+  return (
+    <div className="perm nodrag">
+      {questions.map((q, qi) => (
+        <div key={qi} className="question">
+          {q.header && <div className="questionHeader">{q.header}</div>}
+          <div className="questionText">{q.question}</div>
+          <div className="questionOpts">
+            {(q.options || []).map((opt, oi) => {
+              const selected = selections[qi].has(opt.label);
+              return (
+                <button
+                  key={oi}
+                  className={`questionOpt${selected ? " selected" : ""}`}
+                  onClick={() => toggle(qi, opt.label, q.multiSelect)}
+                >
+                  <div className="questionOptLabel">{opt.label}</div>
+                  {opt.description && (
+                    <div className="questionOptDesc">{opt.description}</div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      <div className="permActions">
+        <button className="allow" disabled={!ready} onClick={submit}>
+          Submit
+        </button>
+        <button className="ghost" onClick={() => onAnswer(requestId, "deny")}>
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function PermPrompt({ perm, onAnswer }) {
   const { requestId, tool_name, input } = perm;
+  if (tool_name === "AskUserQuestion") {
+    return <QuestionPrompt requestId={requestId} input={input} onAnswer={onAnswer} />;
+  }
   return (
     <div className="perm nodrag">
       <div className="permTool">

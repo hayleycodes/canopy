@@ -151,8 +151,8 @@ export default function App() {
 
   // Answer a permission prompt (requestId is globally unique) and drop it from
   // whichever pending node raised it.
-  const onAnswer = useCallback((requestId, behavior) => {
-    answerPermission(requestId, behavior);
+  const onAnswer = useCallback((requestId, behavior, updatedInput) => {
+    answerPermission(requestId, behavior, updatedInput);
     setPendings((ps) =>
       ps.map((p) => ({ ...p, perms: p.perms.filter((q) => q.requestId !== requestId) }))
     );

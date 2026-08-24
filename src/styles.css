@@ -216,6 +216,65 @@ body {
   background: #4F7A3F;
   color: #ffffff;
 }
+.permActions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.question {
+  margin-bottom: 10px;
+}
+.questionHeader {
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #6E9E5B;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.questionText {
+  font-size: 12px;
+  color: #33281B;
+  margin-bottom: 6px;
+}
+.questionOpts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.questionOpt {
+  text-align: left;
+  padding: 6px 8px;
+  border: 1px solid #6E9E5B;
+  background: #FFFFFFcc;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.questionOpt:hover {
+  border-color: #4F7A3F;
+}
+.questionOpt.selected {
+  background: #4F7A3F;
+  border-color: #4F7A3F;
+}
+.questionOptLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: #33281B;
+}
+.questionOpt.selected .questionOptLabel,
+.questionOpt.selected .questionOptDesc {
+  color: #ffffff;
+}
+.questionOptDesc {
+  font-size: 11px;
+  color: #5A4A32;
+  margin-top: 2px;
+  line-height: 1.35;
+}
 @keyframes blink {
   50% {
     opacity: 0;
