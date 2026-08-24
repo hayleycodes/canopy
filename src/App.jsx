@@ -661,17 +661,17 @@ export default function App() {
               {selected?.streaming ? (
                 <>
                   {selected.auto ? (
-                    <span className="autoOn" title="This turn approves actions automatically">
-                      ⚡ auto-approving
+                    <span className="autoOn" title="Approving the rest of this turn's requests without asking">
+                      ⚡ approving the rest
                     </span>
                   ) : (
                     <button
                       className="ghost"
                       onClick={() => enableAuto(selected.id, selected.turnId)}
                       disabled={!selected.turnId}
-                      title="Stop prompting — approve the rest of this turn's actions automatically"
+                      title="Stop prompting — approve the rest of this turn's permission requests without asking"
                     >
-                      ⚡ auto-approve
+                      ⚡ stop asking, approve the rest
                     </button>
                   )}
                   <button
