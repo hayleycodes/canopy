@@ -11,13 +11,18 @@
 // within its own slot.
 
 const H_GAP = 260; // horizontal spacing between sibling columns
-const V_GAP = 150; // vertical spacing between depths
+const V_GAP = 50; // vertical gap between a card's bottom and its child's top
+const DEFAULT_H = 100; // assumed card height before React Flow has measured it
 const TREE_GAP = 1.5; // gap between trees, in column units
 
 // `slots` (rootId -> base column) is a persistent map the caller keeps across
 // renders so each tree keeps its horizontal position. The default fresh Map makes
 // this a stateless one-off layout (used by tests).
-export function layoutTree(nodes, slots = new Map()) {
+// `heights` (id -> measured pixel height) lets each child clear its actual
+// parent instead of a fixed row height, so tall cards no longer overlap the
+// row below. Unmeasured nodes fall back to DEFAULT_H (which keeps the simple
+// depth*row spacing the tests assert).
+export function layoutTree(nodes, slots = new Map(), heights = new Map()) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const children = new Map(nodes.map((n) => [n.id, []]));
   const roots = [];
@@ -39,22 +44,33 @@ export function layoutTree(nodes, slots = new Map()) {
   const local = new Map(); // id -> { lx, y }
   const nodeRoot = new Map(); // id -> rootId
   const width = new Map(); // rootId -> column width
+  const heightOf = (id) => heights.get(id)?.height || DEFAULT_H;
   for (const root of roots) {
     let cursor = 0; // next free leaf column, LOCAL to this tree
-    function place(id, depth) {
+    // First pass: horizontal columns (post-order so a parent centers on its kids).
+    function place(id) {
       nodeRoot.set(id, root);
       const kids = children.get(id);
       let lx;
       if (kids.length === 0) {
         lx = cursor++;
       } else {
-        const xs = kids.map((k) => place(k, depth + 1));
+        const xs = kids.map((k) => place(k));
         lx = (xs[0] + xs[xs.length - 1]) / 2;
       }
-      local.set(id, { lx, y: depth * V_GAP });
+      local.set(id, { lx, y: 0 });
       return lx;
     }
-    place(root, 0);
+    place(root);
+    // Second pass: vertical position. Each child sits below its parent's ACTUAL
+    // bottom, so a tall card pushes its children (and their subtree) further down
+    // instead of overlapping them.
+    function drop(id, y) {
+      local.get(id).y = y;
+      const childY = y + heightOf(id) + V_GAP;
+      for (const k of children.get(id)) drop(k, childY);
+    }
+    drop(root, 0);
     width.set(root, Math.max(cursor, 1));
   }
 

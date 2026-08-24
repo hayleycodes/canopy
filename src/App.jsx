@@ -229,12 +229,12 @@ export default function App() {
   // Positions only depend on the tree shape, so keep the (relatively expensive)
   // layout out of the render path that reacts to selection/highlight changes.
   const layout = useMemo(() => {
-    const pos = layoutTree(allNodes, treeSlots.current);
+    const pos = layoutTree(allNodes, treeSlots.current, dims);
     // Which nodes already have a child — the ⑂ button only makes sense there,
     // where it splits off a sibling branch. A leaf is continued via the composer.
     const hasChild = new Set(allNodes.map((n) => n.parentId).filter(Boolean));
     return { pos, hasChild };
-  }, [allNodes]);
+  }, [allNodes, dims]);
 
   const { rfNodes, rfEdges } = useMemo(() => {
     const { pos, hasChild } = layout;
