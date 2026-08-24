@@ -19,4 +19,15 @@ export default defineConfig({
       },
     },
   },
+  // Same proxy for `vite preview` (the built app), so a no-hot-reload build can
+  // reach the API on one origin too.
+  preview: {
+    port: webPort,
+    proxy: {
+      "/api": {
+        target: `http://localhost:${apiPort}`,
+        changeOrigin: true,
+      },
+    },
+  },
 });
