@@ -9,6 +9,7 @@ import Markdown from "./Markdown.jsx";
 import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.jsx";
 import { layoutTree } from "./layout.js";
 import { parseErrorPaste } from "./errorPaste.js";
+import { findingItems, looksLikeReview } from "./findings.js";
 import { answerPermission, fetchConfig, fetchGraph, resetGraph, runTurn, setPin, setTurnAuto } from "./api.js";
 
 const nodeTypes = { canopy: NodeCard };
@@ -55,6 +56,10 @@ export default function App() {
   // measured size here (fed by onNodesChange) and merge it back onto each node so
   // rebuilt nodes stay "initialized" and visible. Keyed by node id.
   const [dims, setDims] = useState(() => new Map());
+  // Which review nodes are broken out into per-finding cards. A node isn't in the
+  // map → follow auto-detection (looksLikeReview); mapped to true/false → the user
+  // forced it split or merged via the node's split button. Keyed by node id.
+  const [splitOverride, setSplitOverride] = useState(() => new Map());
   const inputRef = useRef(null);
   const replyRef = useRef(null); // inspector's composer, focused for a new conversation
   const inspectorRef = useRef(null);
@@ -64,6 +69,11 @@ export default function App() {
   // Abort fns for in-flight turns, keyed by tempId, so we can stop them (kill the
   // server-side stream + CLI child) on reset instead of leaving them running.
   const aborters = useRef(new Map());
+  // Real branches born by replying to a finding card: realSessionId -> finding
+  // node id. Lineage-wise these fork the review session, but we hang them under
+  // their finding card on the canvas so "the conversation about finding 2" reads
+  // as a child of finding 2, not a sibling of it.
+  const findingBranch = useRef(new Map());
 
   // Draggable inspector width, remembered across reloads.
   const [inspectorWidth, setInspectorWidth] = useState(() => {
@@ -116,6 +126,37 @@ export default function App() {
     setPrompt("");
     inputRef.current?.focus();
   }, []);
+
+  // Review replies broken out into findings: for each real node whose reply is a
+  // findings list, the parsed items and whether it's currently shown as cards
+  // (auto-detected, unless the user's split button overrode it). Pending/streaming
+  // turns are excluded — a half-streamed list would flicker synthetic children.
+  const findingInfo = useMemo(() => {
+    const m = new Map();
+    for (const n of nodes) {
+      if (n.kind === "summary") continue;
+      const items = findingItems(n.result);
+      if (items.length < 2) continue;
+      const auto = looksLikeReview(n.result, items);
+      const shown = splitOverride.has(n.id) ? splitOverride.get(n.id) : auto;
+      m.set(n.id, { items, shown });
+    }
+    return m;
+  }, [nodes, splitOverride]);
+
+  // Split/merge a review node's findings by hand — the fallback when auto-detect
+  // misses a review (or fires on a list you'd rather keep whole).
+  const toggleSplit = useCallback(
+    (id) => {
+      const cur = findingInfo.get(id)?.shown ?? false;
+      setSplitOverride((prev) => {
+        const next = new Map(prev);
+        next.set(id, !cur);
+        return next;
+      });
+    },
+    [findingInfo]
+  );
 
   const refresh = useCallback(async () => {
     const g = await fetchGraph();
@@ -214,7 +255,13 @@ export default function App() {
   // Merge every live pending turn into the set we lay out, so each streaming
   // branch appears immediately, in place, before its real session_id exists.
   const allNodes = useMemo(() => {
-    const list = [...nodes];
+    // A branch spawned from a finding forks the review session, so its real
+    // lineage parent is the review node — but on the canvas we re-parent it onto
+    // its finding card so it reads as that finding's conversation.
+    const list = nodes.map((n) => {
+      const fp = findingBranch.current.get(n.id);
+      return fp ? { ...n, parentId: fp } : n;
+    });
     for (const p of pendings) {
       // A fresh root (no parent) has no persisted session yet, so the server
       // hasn't built its summary header. Synthesize one now from the opening
@@ -250,12 +297,35 @@ export default function App() {
         order: Infinity,
       });
     }
+    // Hang one child node under each shown review node, one per finding, holding
+    // that finding's explanation. Like the summary headers these aren't Claude
+    // sessions of their own — until you reply to one, which forks the review into
+    // a real conversation scoped to that finding (see sendReply).
+    for (const [reviewId, info] of findingInfo) {
+      if (!info.shown) continue;
+      const parent = nodes.find((n) => n.id === reviewId);
+      info.items.forEach((it, i) => {
+        list.push({
+          id: `finding-${reviewId}-${i}`,
+          parentId: reviewId,
+          kind: "finding",
+          finding: it,
+          reviewId,
+          label: it.headline,
+          prompt: "",
+          result: it.body, // the explanation is this node's content
+          order: (parent?.order ?? 0) + (i + 1) / 1000,
+        });
+      });
+    }
     return list;
-  }, [nodes, pendings]);
+  }, [nodes, pendings, findingInfo]);
 
   // Persistent per-tree horizontal slots, so a tree keeps its x position across
   // renders and forking one tree never shifts another.
   const treeSlots = useRef(new Map());
+  // Bumped by "tidy" to force a fresh re-pack of the slots (see onTidy).
+  const [tidyNonce, setTidyNonce] = useState(0);
 
   // Positions only depend on the tree shape, so keep the (relatively expensive)
   // layout out of the render path that reacts to selection/highlight changes.
@@ -265,7 +335,18 @@ export default function App() {
     // where it splits off a sibling branch. A leaf is continued via the composer.
     const hasChild = new Set(allNodes.map((n) => n.parentId).filter(Boolean));
     return { pos, hasChild };
-  }, [allNodes, dims]);
+  }, [allNodes, dims, tidyNonce]);
+
+  // Tidy the forest: trees keep a slot assigned once and never re-packed, so a
+  // tree that grows wider than its original slot ends up overlapping its
+  // neighbour. Clearing the slot cache re-packs every tree left-to-right by its
+  // current width on the next layout — no page refresh, so no conversations are
+  // lost. Re-fit the camera afterwards since positions shift.
+  const onTidy = useCallback(() => {
+    treeSlots.current.clear();
+    setTidyNonce((n) => n + 1);
+    requestAnimationFrame(() => rfRef.current?.fitView({ duration: 300 }));
+  }, []);
 
   const { rfNodes, rfEdges } = useMemo(() => {
     const { pos, hasChild } = layout;
@@ -289,13 +370,21 @@ export default function App() {
         // A synthetic header for a still-streaming root can't be pinned yet.
         pending: n.pending,
         onTogglePin: togglePin,
+        // A finding card carries the finding it holds; selecting it opens the
+        // finding in the inspector, where a reply forks the review to work on it.
+        finding: n.finding,
+        // Real review node whose reply is a findings list — offer split/merge, and
+        // show whether it's currently broken out.
+        canSplit: findingInfo.has(n.id),
+        split: findingInfo.get(n.id)?.shown ?? false,
+        onSplit: toggleSplit,
         // Detect a pasted stack trace so the card can headline the error instead
         // of showing a meaningless truncation of the raw blob.
-        errorPaste: n.kind !== "summary" ? parseErrorPaste(n.prompt) : null,
+        errorPaste: n.kind !== "summary" && n.kind !== "finding" ? parseErrorPaste(n.prompt) : null,
         tokens: n.tokens,
         perms: n.perms || [],
         // Real node (a pending turn has no session yet) that already branched.
-        canFork: !n.streaming && n.kind !== "summary" && hasChild.has(n.id),
+        canFork: !n.streaming && n.kind !== "summary" && n.kind !== "finding" && hasChild.has(n.id),
         // Highlighted as the thread scrolls past its exchange (but not summaries).
         highlighted: n.id === inViewId && n.kind !== "summary",
         onAnswer,
@@ -312,7 +401,7 @@ export default function App() {
         animated: n.streaming,
       }));
     return { rfNodes, rfEdges };
-  }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom, togglePin, dims]);
+  }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom, toggleSplit, togglePin, findingInfo, dims]);
 
   // Camera: frame the canvas once, on the initial load, via ReactFlow's own
   // `fitView` prop — and then never move it automatically again. Every automatic
@@ -373,7 +462,13 @@ export default function App() {
   // selected we edit that tree's mode; otherwise we're setting up a new root. A
   // pending node has no session id yet, so we key off its parent.
   const targetRoot = selected
-    ? rootOf(selected.streaming ? selected.parentId : selected.id)
+    ? rootOf(
+        selected.kind === "finding"
+          ? selected.reviewId
+          : selected.streaming
+            ? selected.parentId
+            : selected.id
+      )
     : null;
   const currentMode = targetRoot ? modes[targetRoot] ?? "default" : newRootMode;
 
@@ -388,9 +483,13 @@ export default function App() {
   // Run a turn: seed (parentId null) or continue/fork from a node (parentId set).
   // Streamed, and many can run concurrently — each tracked by its own tempId.
   const startTurn = useCallback(
-    (parentId, rawText, images = []) => {
+    (parentId, rawText, images = [], opts = {}) => {
       const text = (rawText || "").trim();
       if (!text) return;
+
+      // Where this branch appears on the canvas — its fork parent by default, but
+      // a finding reply pins it under the finding card while forking the review.
+      const displayParentId = opts.displayParentId ?? parentId;
 
       // The turn runs under its conversation's mode: an existing tree's stored
       // mode, or the chosen mode for a brand-new root.
@@ -407,7 +506,7 @@ export default function App() {
       setError(null);
       setPendings((ps) => [
         ...ps,
-        { tempId, parentId, label: text, result: "", perms: [], turnId: null, auto: false, images },
+        { tempId, parentId: displayParentId, label: text, result: "", perms: [], turnId: null, auto: false, images },
       ]);
       // Follow the new branch in the chat as it streams.
       setSelectedId(tempId);
@@ -421,6 +520,11 @@ export default function App() {
             patchPending(tempId, (p) => ({ ...p, perms: [...p.perms, req] })),
           onNode: async (node) => {
             aborters.current.delete(tempId);
+            // A finding reply keeps its display parent: remember the real session
+            // -> finding card link so the reconstructed node re-parents onto it.
+            if (opts.displayParentId && opts.displayParentId !== parentId) {
+              findingBranch.current.set(node.id, opts.displayParentId);
+            }
             // A new root carries the mode chosen for it into the modes map.
             if (!parentId) setModes((m) => ({ ...m, [node.id]: newRootMode }));
             // Bring in the real node BEFORE dropping the pending, so the selected
@@ -484,18 +588,25 @@ export default function App() {
   // Inspector composer: continue the selected conversation from that node, or —
   // when the inspector is open for a new conversation — seed a fresh root.
   const sendReply = useCallback(() => {
-    if (selectedId) startTurn(selectedId, reply, replyImages);
+    if (selected?.kind === "finding") {
+      // The review session already holds the whole review (this finding included),
+      // so forking it and naming the finding scopes the new branch to it. Put the
+      // reference last so the node's label reads as what you actually typed.
+      const scoped = `${reply}\n\n(Re: your review finding — ${selected.finding.headline})`;
+      startTurn(selected.reviewId, scoped, replyImages, { displayParentId: selected.id });
+    } else if (selectedId) startTurn(selectedId, reply, replyImages);
     else if (composingNew) startTurn(null, reply, replyImages);
     else return;
     setReply("");
     setReplyImages([]);
-  }, [startTurn, selectedId, composingNew, reply, replyImages]);
+  }, [startTurn, selected, selectedId, composingNew, reply, replyImages]);
 
   const onReset = useCallback(async () => {
     // Stop every in-flight turn (closes its stream, kills the CLI child) before
     // clearing state, so nothing keeps running server-side after a reset.
     for (const abort of aborters.current.values()) abort();
     aborters.current.clear();
+    findingBranch.current.clear();
     await resetGraph();
     setSelectedId(null);
     setPendings([]);
@@ -532,6 +643,9 @@ export default function App() {
           </div>
         )}
         <button onClick={newConversation}>＋ new conversation</button>
+        <button className="ghost" onClick={onTidy} disabled={empty} title="Re-pack the trees so they stop overlapping">
+          🧹 tidy
+        </button>
         <button className="ghost" onClick={onReset} disabled={empty}>
           reset
         </button>
@@ -621,7 +735,7 @@ export default function App() {
           >
           <div className="inspectorHead">
             <span className="mono">
-              {selected ? (selected.streaming ? "streaming…" : selected.id.slice(0, 8)) : "new conversation"}
+              {selected ? (selected.streaming ? "streaming…" : selected.kind === "finding" ? `finding ${selected.finding.n}` : selected.id.slice(0, 8)) : "new conversation"}
             </span>
             <button
               className="ghost"
@@ -639,7 +753,22 @@ export default function App() {
                 Ask anything to start a new conversation.
               </div>
             )}
-            {thread.map((n) => (
+            {thread.map((n) =>
+              n.kind === "finding" ? (
+                // A finding pulled out of the review — its explanation, not a
+                // prompt/reply pair. Reply below to fork the review and work on it.
+                <div
+                  key={n.id}
+                  ref={n.id === selected.id ? currentRef : null}
+                  data-node-id={n.id}
+                  className={`exchange finding${n.id === selected.id ? " current" : ""}`}
+                >
+                  <div className="findingTag">◆ FINDING {n.finding.n}</div>
+                  <div className="msg assistant">
+                    <Markdown>{n.finding.body}</Markdown>
+                  </div>
+                </div>
+              ) : (
               <div
                 key={n.id}
                 ref={n.id === selected.id ? currentRef : null}
@@ -668,7 +797,8 @@ export default function App() {
                   <PermPrompt key={p.requestId} perm={p} onAnswer={onAnswer} />
                 ))}
               </div>
-            ))}
+              )
+            )}
           </div>
           <div className="resume">
             <Thumbnails
@@ -691,7 +821,9 @@ export default function App() {
                   ? "Ask anything to start a new conversation…"
                   : selected.streaming
                     ? "Streaming… reply once it finishes"
-                    : "Reply to continue this conversation…"
+                    : selected.kind === "finding"
+                      ? "Reply to fork the review and work on this finding…"
+                      : "Reply to continue this conversation…"
               }
               rows={3}
               disabled={!!selected?.streaming}

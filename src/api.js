@@ -1,12 +1,23 @@
 // Thin client over the local server. The browser only ever speaks to /api.
 
+import { DEMO_GRAPH, DEMO_CONFIG } from "./demoData.js";
+
+// Screenshot/demo mode: open the app with `?demo` and it renders a hardcoded
+// dummy forest with no server or Claude CLI running (see demoData.js). Only the
+// two read calls below are stubbed — enough to paint the canvas for a screenshot.
+const DEMO =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).has("demo");
+
 export async function fetchConfig() {
+  if (DEMO) return DEMO_CONFIG;
   const res = await fetch("/api/config");
   if (!res.ok) throw new Error(`config ${res.status}`);
   return res.json();
 }
 
 export async function fetchGraph() {
+  if (DEMO) return DEMO_GRAPH;
   const res = await fetch("/api/graph");
   if (!res.ok) throw new Error(`graph ${res.status}`);
   return res.json();

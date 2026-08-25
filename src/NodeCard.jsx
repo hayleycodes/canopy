@@ -13,7 +13,7 @@ function fmtTokens(n) {
 // requests surface here as Allow/Deny. The ⑂ button branches a new child off
 // this node — do it on a node that already has children to split the tree.
 export default function NodeCard({ data, selected }) {
-  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted, errorPaste, tokens, rootId, pinned, pending, onTogglePin } = data;
+  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted, errorPaste, tokens, finding, canSplit, split, onSplit, rootId, pinned, pending, onTogglePin } = data;
 
   // A tree's summary header — what the whole conversation is about. The 📌 toggle
   // pins the tree so it stays on the canvas even once newer conversations would
@@ -40,6 +40,23 @@ export default function NodeCard({ data, selected }) {
     );
   }
 
+  // A finding pulled out of a review reply into its own node: it holds the
+  // finding's explanation, and selecting it opens the finding in the inspector,
+  // where a reply forks the review into a real conversation to work on it.
+  if (kind === "finding") {
+    return (
+      <div className={`findingCard${selected ? " selected" : ""}${highlighted ? " inView" : ""}`}>
+        <Handle type="target" position={Position.Top} />
+        <div className="findingHead">
+          <span className="findingNum">{finding.n}</span>
+          <span className="findingTitle">{finding.headline || "finding"}</span>
+        </div>
+        {finding.body && <div className="findingBody">{finding.body}</div>}
+        <Handle type="source" position={Position.Bottom} />
+      </div>
+    );
+  }
+
   return (
     <div className={`nodeCard${selected ? " selected" : ""}${highlighted ? " inView" : ""}${streaming ? " streaming" : ""}${errorPaste ? " errored" : ""}`}>
       <Handle type="target" position={Position.Top} />
@@ -60,6 +77,18 @@ export default function NodeCard({ data, selected }) {
           </div>
         ) : (
           <div className="nodeLabel">{label || "…"}</div>
+        )}
+        {canSplit && (
+          <button
+            className="splitBtn nodrag"
+            title={split ? "Merge findings back into this reply" : "Split this review's findings into cards"}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSplit(id);
+            }}
+          >
+            {split ? "⤺ merge" : "⑃ split"}
+          </button>
         )}
         {canFork && (
           <button

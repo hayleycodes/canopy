@@ -13,7 +13,7 @@
 const H_GAP = 260; // horizontal spacing between sibling columns
 const V_GAP = 50; // vertical gap between a card's bottom and its child's top
 const DEFAULT_H = 100; // assumed card height before React Flow has measured it
-const TREE_GAP = 1.5; // gap between trees, in column units
+const TREE_GAP = 0.5; // gap between trees, in column units
 
 // `slots` (rootId -> base column) is a persistent map the caller keeps across
 // renders so each tree keeps its horizontal position. The default fresh Map makes
