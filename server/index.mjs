@@ -217,6 +217,12 @@ async function handleStream(req, res, url) {
     // no gap ("…then build.Now I'll…"), so when a fresh text block starts after
     // we've already streamed some text, insert a blank line between them.
     let emittedText = false;
+    // The CLI's terminal `result` event carries only the LAST assistant message,
+    // but a turn with tool calls emits several text blocks (narrate, call a tool,
+    // narrate again). We stream all of them, so accumulate exactly what we sent
+    // and store that — otherwise the node loses everything but its final block the
+    // instant the turn lands (store.mjs joins the same way when reading from disk).
+    let streamed = "";
     // Write any attached screenshots to a temp dir and point the CLI prompt at
     // them by path; the stored node keeps the human's original text.
     const imagePaths = writeTurnImages(turnId, images);
@@ -231,11 +237,13 @@ async function handleStream(req, res, url) {
           inner.content_block?.type === "text" &&
           emittedText
         ) {
+          streamed += "\n\n";
           send("token", { text: "\n\n" });
         }
         const token = extractToken(evt);
         if (token) {
           emittedText = true;
+          streamed += token;
           send("token", { text: token });
         }
       }
@@ -245,7 +253,7 @@ async function handleStream(req, res, url) {
       sessionId: final.session_id,
       parentId,
       prompt,
-      result: final.result ?? "",
+      result: streamed || final.result || "",
       usage: final.usage,
     });
     // Persist the true fork link so the tree survives compaction, which would
