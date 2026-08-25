@@ -246,7 +246,13 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     // This node's own turn is the tail after the shared ancestor prefix.
     const tail = s.msgs.slice(s.parentLen);
     const prompt = tail.find((m) => m.role === "user")?.text || "";
-    const lastAssistant = [...tail].reverse().find((m) => m.role === "assistant");
+    // A turn with tool calls writes several assistant messages (narrate, call a
+    // tool, narrate again); join them all so the persisted node matches what
+    // streamed live, rather than collapsing to just the final block.
+    const reply = tail
+      .filter((m) => m.role === "assistant" && m.text)
+      .map((m) => m.text)
+      .join("\n\n");
     // Prefer this node's own new prompt (distinctive per fork); aiTitle is
     // conversation-level and repeats across a tree's branches.
     const label = labelFor(prompt) || s.title || "(untitled)";
@@ -256,7 +262,7 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
       order: i,
       prompt,
       label,
-      result: lastAssistant?.text || "",
+      result: reply,
       tokens: tokensForTail(tail),
     };
   });
