@@ -129,6 +129,7 @@ body {
   font-size: 14px;
   font-weight: 600;
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 /* a review finding pulled out of a reply into its own node: it holds the
@@ -226,6 +227,8 @@ body {
   font-weight: 600;
   line-height: 1.3;
   flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .forkBtn {
   background: transparent;
