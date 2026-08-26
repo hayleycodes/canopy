@@ -18,6 +18,13 @@ const nodeTypes = { canopy: NodeCard };
 // fresh [] to consumers on every render.
 const EMPTY_IMAGES = [];
 
+// Replying to a finding card tags the prompt with this suffix (see sendReply),
+// naming the finding it forked off. It's the durable record of that link — the
+// server only knows the branch forked the review session, not which finding — so
+// we read it back to re-hang the branch under its finding card. Anchored to the
+// end so it survives whatever the user typed before it.
+const FINDING_REPLY_RE = /\(Re: your review finding — (.+)\)\s*$/;
+
 export default function App() {
   const [nodes, setNodes] = useState([]); // server nodes
   // Every in-flight turn, keyed by a temp id. Many can stream at once — one per
@@ -87,11 +94,6 @@ export default function App() {
   // Abort fns for in-flight turns, keyed by tempId, so we can stop them (kill the
   // server-side stream + CLI child) on reset instead of leaving them running.
   const aborters = useRef(new Map());
-  // Real branches born by replying to a finding card: realSessionId -> finding
-  // node id. Lineage-wise these fork the review session, but we hang them under
-  // their finding card on the canvas so "the conversation about finding 2" reads
-  // as a child of finding 2, not a sibling of it.
-  const findingBranch = useRef(new Map());
 
   // Draggable inspector width, remembered across reloads.
   const [inspectorWidth, setInspectorWidth] = useState(() => {
@@ -365,12 +367,25 @@ export default function App() {
   // Merge every live pending turn into the set we lay out, so each streaming
   // branch appears immediately, in place, before its real session_id exists.
   const allNodes = useMemo(() => {
-    // A branch spawned from a finding forks the review session, so its real
-    // lineage parent is the review node — but on the canvas we re-parent it onto
-    // its finding card so it reads as that finding's conversation.
+    // Re-hang finding replies under their finding card. Such a branch's real
+    // (server) parent is the review node, but its prompt carries the finding it
+    // forked off (FINDING_REPLY_RE); match that headline to the review's finding
+    // cards and re-parent onto the right one, so the reply reads as that
+    // finding's conversation instead of a sibling of the findings. Derived from
+    // persisted data, so it holds across reloads with no separate bookkeeping.
+    const cardByHeadline = new Map(); // reviewId -> (headline -> finding card id)
+    for (const [reviewId, info] of findingInfo) {
+      if (!info.shown) continue;
+      const m = new Map();
+      info.items.forEach((it, i) => m.set(it.headline, `finding-${reviewId}-${i}`));
+      cardByHeadline.set(reviewId, m);
+    }
     const list = nodes.map((n) => {
-      const fp = findingBranch.current.get(n.id);
-      return fp ? { ...n, parentId: fp } : n;
+      const m = n.parentId && cardByHeadline.get(n.parentId);
+      if (!m) return n;
+      const headline = n.prompt?.match(FINDING_REPLY_RE)?.[1]?.trim();
+      const cardId = headline && m.get(headline);
+      return cardId ? { ...n, parentId: cardId } : n;
     });
     for (const p of pendings) {
       // A fresh root (no parent) has no persisted session yet, so the server
@@ -647,11 +662,8 @@ export default function App() {
             patchPending(tempId, (p) => ({ ...p, perms: [...p.perms, req] })),
           onNode: async (node) => {
             aborters.current.delete(tempId);
-            // A finding reply keeps its display parent: remember the real session
-            // -> finding card link so the reconstructed node re-parents onto it.
-            if (opts.displayParentId && opts.displayParentId !== parentId) {
-              findingBranch.current.set(node.id, opts.displayParentId);
-            }
+            // A finding reply re-hangs under its finding card via its prompt tag
+            // (see allNodes), so nothing to record here.
             // A new root carries the mode chosen for it into the modes map.
             if (!parentId) setModes((m) => ({ ...m, [node.id]: newRootMode }));
             // Bring in the real node BEFORE dropping the pending, so the selected
@@ -747,7 +759,6 @@ export default function App() {
     // clearing state, so nothing keeps running server-side after a reset.
     for (const abort of aborters.current.values()) abort();
     aborters.current.clear();
-    findingBranch.current.clear();
     await resetGraph();
     setSelectedId(null);
     setPendings([]);
