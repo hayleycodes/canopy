@@ -102,6 +102,17 @@ export async function setPin(rootId, pinned) {
   });
 }
 
+// Archive or unarchive a conversation by its root id. An archived tree drops off
+// the canvas (its transcript is kept) and shows in the drawer, where unarchiving
+// brings it back.
+export async function setArchive(rootId, archived) {
+  await fetch("/api/archive", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ rootId, archived }),
+  });
+}
+
 // Switch a live turn to auto-approve: from now on the server allows every
 // permission request for this turn (and any already waiting) without asking.
 export async function setTurnAuto(turnId, enabled) {

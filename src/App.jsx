@@ -10,7 +10,7 @@ import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.js
 import { layoutTree } from "./layout.js";
 import { parseErrorPaste } from "./errorPaste.js";
 import { findingItems, looksLikeReview } from "./findings.js";
-import { answerPermission, fetchConfig, fetchGraph, resetGraph, runTurn, setPin, setTurnAuto } from "./api.js";
+import { answerPermission, fetchConfig, fetchGraph, resetGraph, runTurn, setArchive, setPin, setTurnAuto } from "./api.js";
 
 const nodeTypes = { canopy: NodeCard };
 
@@ -27,6 +27,8 @@ const FINDING_REPLY_RE = /\(Re: your review finding — (.+)\)\s*$/;
 
 export default function App() {
   const [nodes, setNodes] = useState([]); // server nodes
+  const [archivedList, setArchivedList] = useState([]); // [{ rootId, label }] off-canvas
+  const [drawerOpen, setDrawerOpen] = useState(false);
   // Every in-flight turn, keyed by a temp id. Many can stream at once — one per
   // branch — so thinking on the right never blocks talking on the left.
   const [pendings, setPendings] = useState([]); // [{ tempId, parentId, label, result, perms }]
@@ -226,6 +228,7 @@ export default function App() {
   const refresh = useCallback(async () => {
     const g = await fetchGraph();
     setNodes(g.nodes);
+    setArchivedList(g.archived || []);
   }, []);
 
   // Pin/unpin a conversation from its summary header. A pinned tree survives the
@@ -237,6 +240,35 @@ export default function App() {
       await refresh();
     },
     [refresh]
+  );
+
+  // Walk parent links to the root of whatever conversation a node belongs to.
+  const rootOf = useCallback(
+    (nodeId) => {
+      const byId = new Map(nodes.map((n) => [n.id, n]));
+      let cur = byId.get(nodeId);
+      // Climb to the real root — stop before the synthetic summary header so
+      // per-conversation modes stay keyed by the actual root session id.
+      while (cur && cur.parentId && byId.has(cur.parentId)) {
+        if (byId.get(cur.parentId).kind === "summary") break;
+        cur = byId.get(cur.parentId);
+      }
+      return cur ? cur.id : null;
+    },
+    [nodes]
+  );
+
+  // Archive/unarchive a conversation from its summary header (archive) or the
+  // drawer (unarchive). Persisted server-side; refresh to pick up which trees are
+  // now drawn and what's in the drawer. Archiving the selected tree deselects it
+  // so the inspector doesn't dangle on a node that just left the canvas.
+  const toggleArchive = useCallback(
+    async (rootId, archived) => {
+      await setArchive(rootId, archived);
+      if (archived && rootOf(selectedId) === rootId) setSelectedId(null);
+      await refresh();
+    },
+    [refresh, rootOf, selectedId]
   );
 
   useEffect(() => {
@@ -497,6 +529,7 @@ export default function App() {
         // A synthetic header for a still-streaming root can't be pinned yet.
         pending: n.pending,
         onTogglePin: togglePin,
+        onToggleArchive: toggleArchive,
         // A finding card carries the finding it holds; selecting it opens the
         // finding in the inspector, where a reply forks the review to work on it.
         finding: n.finding,
@@ -530,7 +563,7 @@ export default function App() {
         animated: n.streaming,
       }));
     return { rfNodes, rfEdges };
-  }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom, toggleSplit, togglePin, findingInfo, dims, readyIds]);
+  }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom, toggleSplit, togglePin, toggleArchive, findingInfo, dims, readyIds]);
 
   // Camera: frame the canvas once, on the initial load, via ReactFlow's own
   // `fitView` prop — and then never move it automatically again. Every automatic
@@ -570,22 +603,6 @@ export default function App() {
     }
     return chain;
   }, [selected, allNodes]);
-
-  // Walk parent links to the root of whatever conversation a node belongs to.
-  const rootOf = useCallback(
-    (nodeId) => {
-      const byId = new Map(nodes.map((n) => [n.id, n]));
-      let cur = byId.get(nodeId);
-      // Climb to the real root — stop before the synthetic summary header so
-      // per-conversation modes stay keyed by the actual root session id.
-      while (cur && cur.parentId && byId.has(cur.parentId)) {
-        if (byId.get(cur.parentId).kind === "summary") break;
-        cur = byId.get(cur.parentId);
-      }
-      return cur ? cur.id : null;
-    },
-    [nodes]
-  );
 
   // The conversation the composer currently targets, and its mode. With a node
   // selected we edit that tree's mode; otherwise we're setting up a new root. A
@@ -800,10 +817,46 @@ export default function App() {
         <button className="ghost" onClick={onTidy} disabled={empty} title="Re-pack the trees so they stop overlapping">
           🧹 tidy
         </button>
+        {archivedList.length > 0 && (
+          <button
+            className={`ghost${drawerOpen ? " on" : ""}`}
+            onClick={() => setDrawerOpen((o) => !o)}
+            title="Conversations you've taken off the canvas"
+          >
+            🗄 archived ({archivedList.length})
+          </button>
+        )}
         <button className="ghost" onClick={onReset} disabled={empty}>
           reset
         </button>
       </header>
+
+      {drawerOpen && archivedList.length > 0 && (
+        <div className="drawer">
+          <div className="drawerHead">
+            <span>Archived</span>
+            <button className="drawerClose nodrag" title="Close" onClick={() => setDrawerOpen(false)}>
+              ✕
+            </button>
+          </div>
+          <div className="drawerList">
+            {archivedList.map((a) => (
+              <div key={a.rootId} className="drawerItem">
+                <span className="drawerItemLabel" title={a.label}>
+                  {a.label}
+                </span>
+                <button
+                  className="drawerRestore"
+                  title="Bring this conversation back onto the canvas"
+                  onClick={() => toggleArchive(a.rootId, false)}
+                >
+                  restore
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="canvas">
         <ReactFlow

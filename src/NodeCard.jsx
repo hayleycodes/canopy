@@ -13,25 +13,38 @@ function fmtTokens(n) {
 // requests surface here as Allow/Deny. The ⑂ button branches a new child off
 // this node — do it on a node that already has children to split the tree.
 export default function NodeCard({ data, selected }) {
-  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted, ready, errorPaste, tokens, finding, canSplit, split, onSplit, rootId, pinned, pending, onTogglePin } = data;
+  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted, ready, errorPaste, tokens, finding, canSplit, split, onSplit, rootId, pinned, pending, onTogglePin, onToggleArchive } = data;
 
   // A tree's summary header — what the whole conversation is about. The 📌 toggle
   // pins the tree so it stays on the canvas even once newer conversations would
-  // otherwise push it off.
+  // otherwise push it off; the 🗄 toggle archives it (off the canvas, into the
+  // drawer) without deleting its transcript.
   if (kind === "summary") {
     return (
       <div className={`summaryCard${pinned ? " pinned" : ""}`}>
         {!pending && (
-          <button
-            className={`pinBtn nodrag${pinned ? " on" : ""}`}
-            title={pinned ? "Unpin — let this conversation scroll off when it gets old" : "Pin — keep this conversation on the canvas"}
-            onClick={(e) => {
-              e.stopPropagation();
-              onTogglePin?.(rootId, !pinned);
-            }}
-          >
-            📌
-          </button>
+          <div className="summaryActions nodrag">
+            <button
+              className={`pinBtn${pinned ? " on" : ""}`}
+              title={pinned ? "Unpin — let this conversation scroll off when it gets old" : "Pin — keep this conversation on the canvas"}
+              onClick={(e) => {
+                e.stopPropagation();
+                onTogglePin?.(rootId, !pinned);
+              }}
+            >
+              📌
+            </button>
+            <button
+              className="archiveBtn"
+              title="Archive — take this conversation off the canvas without deleting it"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleArchive?.(rootId, true);
+              }}
+            >
+              🗄
+            </button>
+          </div>
         )}
         <div className="summaryEyebrow">{pinned ? "PINNED" : "TREE"}</div>
         <div className="summaryText">{label}</div>
