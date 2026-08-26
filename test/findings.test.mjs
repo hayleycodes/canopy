@@ -40,6 +40,30 @@ test("a review reply auto-detects", () => {
   assert.equal(parseFindings(REVIEW).length, 3);
 });
 
+test("splits a review whose findings are prefixed with a severity emoji", () => {
+  // The shape the code-review skill emits: a severity emoji before the bold
+  // number ("🔴 **1. …**"). The emoji must not defeat the item-start match.
+  const review = `Here's my review of **PR 5553**.
+
+Five findings, ranked by severity.
+
+---
+
+🔴 **1. Migration mislabels every existing contacted nomination**
+
+\`services/api/db/migrations/x.sql:5\` — no backfill, so historical rows stay wrong.
+
+🟠 **2. Lost-update race in \`advanceNominationOnSuccessfulLog\`**
+
+\`services/api/service/src/lib/workPlacement/contactStatusTransitions.ts:79\` — read-then-write with no lock.`;
+  const items = findingItems(review);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].headline, "Migration mislabels every existing contacted nomination");
+  assert.equal(items[1].headline, "Lost-update race in advanceNominationOnSuccessfulLog");
+  assert.ok(looksLikeReview(review));
+  assert.equal(parseFindings(review).length, 2);
+});
+
 test("an ordinary numbered list does not auto-detect", () => {
   const steps = `To set it up:\n\n1. Install the deps\n2. Start the server\n3. Open the page`;
   assert.equal(looksLikeReview(steps), false);

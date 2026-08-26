@@ -28,7 +28,10 @@ const FINDING_HEADING = /^\s*#{1,6}\s*Finding\s+\d+\s*[:.\-–—)]?\s+/i;
 // The leading marker of a numbered item: "1.", "2)". A review not written to our
 // format often numbers each finding as a *heading* ("### 1. …") or bolds the
 // number ("**1.** …"), so tolerate a leading `#` heading prefix and/or `**`.
-const ITEM_START = /^\s*(?:#{1,6}\s*)?(?:\*\*\s*)?(\d{1,3})[.)]\s+/;
+// Tools like the code-review skill also prefix a severity emoji ("🔴 **1.** …"),
+// so allow an optional leading pictographic marker (with its variation-selector /
+// ZWJ bytes) before the heading/bold.
+const ITEM_START = /^\s*(?:[\p{Extended_Pictographic}️‍]+\s*)?(?:#{1,6}\s*)?(?:\*\*\s*)?(\d{1,3})[.)]\s+/u;
 
 // One finding's headline — the short thing shown on its card. Prefer a bold
 // **lead**, else the text up to the first dash/colon separator, else a trimmed
@@ -106,7 +109,7 @@ export function looksLikeReview(text, items = findingItems(text)) {
   if (items.length < 2) return false;
 
   // The text before the first numbered item — where "I found 3 issues:" lives.
-  const firstMarker = (text || "").search(/^\s*(?:#{1,6}\s*)?(?:\*\*\s*)?\d{1,3}[.)]\s+/m);
+  const firstMarker = (text || "").search(/^\s*(?:[\p{Extended_Pictographic}️‍]+\s*)?(?:#{1,6}\s*)?(?:\*\*\s*)?\d{1,3}[.)]\s+/mu);
   const leadIn = firstMarker > 0 ? text.slice(0, firstMarker) : "";
   if (FINDINGS_FRAMING.test(leadIn)) return true;
 
