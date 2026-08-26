@@ -13,7 +13,7 @@ function fmtTokens(n) {
 // requests surface here as Allow/Deny. The ⑂ button branches a new child off
 // this node — do it on a node that already has children to split the tree.
 export default function NodeCard({ data, selected }) {
-  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted, errorPaste, tokens, finding, canSplit, split, onSplit, rootId, pinned, pending, onTogglePin } = data;
+  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted, ready, errorPaste, tokens, finding, canSplit, split, onSplit, rootId, pinned, pending, onTogglePin } = data;
 
   // A tree's summary header — what the whole conversation is about. The 📌 toggle
   // pins the tree so it stays on the canvas even once newer conversations would
@@ -58,8 +58,9 @@ export default function NodeCard({ data, selected }) {
   }
 
   return (
-    <div className={`nodeCard${selected ? " selected" : ""}${highlighted ? " inView" : ""}${streaming ? " streaming" : ""}${errorPaste ? " errored" : ""}`}>
+    <div className={`nodeCard${selected ? " selected" : ""}${highlighted ? " inView" : ""}${streaming ? " streaming" : ""}${errorPaste ? " errored" : ""}${ready ? " ready" : ""}`}>
       <Handle type="target" position={Position.Top} />
+      {ready && <span className="readyDot" title="New reply ready — click to open" />}
 
       <div className="nodeHead">
         {errorPaste ? (

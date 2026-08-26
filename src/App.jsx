@@ -4,7 +4,7 @@ import "reactflow/dist/style.css";
 
 import NodeCard from "./NodeCard.jsx";
 import ModeSelect from "./ModeSelect.jsx";
-import PermPrompt from "./PermPrompt.jsx";
+import PermPrompt, { ResolvedQuestions } from "./PermPrompt.jsx";
 import Markdown from "./Markdown.jsx";
 import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.jsx";
 import { layoutTree } from "./layout.js";
@@ -13,6 +13,10 @@ import { findingItems, looksLikeReview } from "./findings.js";
 import { answerPermission, fetchConfig, fetchGraph, resetGraph, runTurn, setPin, setTurnAuto } from "./api.js";
 
 const nodeTypes = { canopy: NodeCard };
+
+// Stable empty-images identity so a draft with no attachments doesn't hand a
+// fresh [] to consumers on every render.
+const EMPTY_IMAGES = [];
 
 export default function App() {
   const [nodes, setNodes] = useState([]); // server nodes
@@ -28,12 +32,20 @@ export default function App() {
   // highlighted on the canvas so scrolling the thread tracks the tree. Kept
   // separate from selectedId so it never rebuilds the thread.
   const [inViewId, setInViewId] = useState(null);
-  const [prompt, setPrompt] = useState("");
-  const [reply, setReply] = useState(""); // inspector's resume field
-  // Screenshots attached to the next turn, one set per composer. Sent with the
-  // prompt, then cleared — the server writes them to a temp file it reads from.
-  const [composerImages, setComposerImages] = useState([]);
-  const [replyImages, setReplyImages] = useState([]);
+  // Composer drafts, keyed by the conversation they target, so switching threads
+  // — by hand, or when a background turn finishes in another tree — never loses
+  // or misattributes a half-written message. Each entry is { text, images }; the
+  // images are the screenshots attached to that draft's next turn, sent with the
+  // prompt then cleared (the server writes them to a temp file it reads from).
+  // The inspector reply is keyed by the selected node ("__new__" while composing
+  // a fresh conversation); the bottom composer by the node it forks from
+  // ("__root__" when seeding a new root).
+  const [replyDrafts, setReplyDrafts] = useState(() => new Map());
+  const [promptDrafts, setPromptDrafts] = useState(() => new Map());
+  // Nodes whose turn finished while you were looking/typing elsewhere: surfaced
+  // passively (a badge on the card + a toast) instead of yanking selection over.
+  const [readyIds, setReadyIds] = useState(() => new Set());
+  const [toasts, setToasts] = useState([]); // [{ id, nodeId, label }]
   // Permission mode is per conversation, keyed by root id — each tree remembers
   // its own. `newRootMode` is the choice for the next fresh conversation.
   // Claude Code's own permission modes: default | acceptEdits | plan | auto.
@@ -66,6 +78,12 @@ export default function App() {
   const currentRef = useRef(null); // the selected exchange in the thread
   const rfRef = useRef(null); // ReactFlow instance, for imperative fitView
   const nextTemp = useRef(0);
+  const toastSeq = useRef(0);
+  // Live mirrors of selection + "am I mid-compose", read inside a turn's async
+  // onNode (whose closure would otherwise see stale values) to decide whether
+  // following a finished turn would steal selection from an active composer.
+  const selectedIdRef = useRef(null);
+  const composingRef = useRef(false);
   // Abort fns for in-flight turns, keyed by tempId, so we can stop them (kill the
   // server-side stream + CLI child) on reset instead of leaving them running.
   const aborters = useRef(new Map());
@@ -106,26 +124,68 @@ export default function App() {
   }, []);
 
   // Paste a screenshot straight into a composer (Cmd/Ctrl+V). Returns a paste
-  // handler bound to one of the attachment setters; a paste that carries no
-  // image falls through untouched so text paste still works.
+  // handler bound to a draft's add-images fn; a paste that carries no image
+  // falls through untouched so text paste still works.
   const pasteImages = useCallback(
-    (setImages) => async (e) => {
+    (addImages) => async (e) => {
       const imgs = await filesToImages(e.clipboardData?.files || []);
       if (!imgs.length) return;
       e.preventDefault();
-      setImages((prev) => [...prev, ...imgs].slice(0, MAX_IMAGES));
+      addImages(imgs);
     },
     []
   );
+
+  // Where each composer's draft lives. The inspector reply follows the selected
+  // node (or "__new__" while seeding a fresh conversation); the bottom composer
+  // follows the node it would fork from (or "__root__" when nothing's selected).
+  const replyKey = selectedId ?? (composingNew ? "__new__" : null);
+  const promptKey = selectedId ?? "__root__";
+  const reply = (replyKey && replyDrafts.get(replyKey)?.text) || "";
+  const replyImages = (replyKey && replyDrafts.get(replyKey)?.images) || EMPTY_IMAGES;
+  const prompt = promptDrafts.get(promptKey)?.text || "";
+  const composerImages = promptDrafts.get(promptKey)?.images || EMPTY_IMAGES;
+
+  // Merge a patch into one draft entry (or drop it entirely). `patch` is either
+  // a partial { text?, images? } or a fn of the current entry.
+  const patchDraft = useCallback((setMap, key, patch) => {
+    if (!key) return;
+    setMap((m) => {
+      const cur = m.get(key) || { text: "", images: EMPTY_IMAGES };
+      const nextEntry = typeof patch === "function" ? patch(cur) : { ...cur, ...patch };
+      const next = new Map(m);
+      next.set(key, nextEntry);
+      return next;
+    });
+  }, []);
+  const clearDraft = useCallback((setMap, key) => {
+    if (!key) return;
+    setMap((m) => {
+      if (!m.has(key)) return m;
+      const next = new Map(m);
+      next.delete(key);
+      return next;
+    });
+  }, []);
+
+  const addImagesTo = (cur, imgs) => ({ ...cur, images: [...cur.images, ...imgs].slice(0, MAX_IMAGES) });
+  const setReplyText = (text) => patchDraft(setReplyDrafts, replyKey, { text });
+  const addReplyImages = (imgs) => patchDraft(setReplyDrafts, replyKey, (d) => addImagesTo(d, imgs));
+  const removeReplyImage = (imgId) =>
+    patchDraft(setReplyDrafts, replyKey, (d) => ({ ...d, images: d.images.filter((im) => im.id !== imgId) }));
+  const setPromptText = (text) => patchDraft(setPromptDrafts, promptKey, { text });
+  const addComposerImages = (imgs) => patchDraft(setPromptDrafts, promptKey, (d) => addImagesTo(d, imgs));
+  const removeComposerImage = (imgId) =>
+    patchDraft(setPromptDrafts, promptKey, (d) => ({ ...d, images: d.images.filter((im) => im.id !== imgId) }));
 
   // Aim the composer at a node so the next prompt branches off it. Forking a
   // node that already has children splits the tree — the new branch is a sibling
   // of the existing one(s).
   const forkFrom = useCallback((id) => {
     setSelectedId(id);
-    setPrompt("");
+    clearDraft(setPromptDrafts, id);
     inputRef.current?.focus();
-  }, []);
+  }, [clearDraft]);
 
   // Review replies broken out into findings: for each real node whose reply is a
   // findings list, the parsed items and whether it's currently shown as cards
@@ -188,14 +248,30 @@ export default function App() {
     document.title = workspace ? `🌳 ${workspace.split("/").pop()}` : "🌳 Canopy";
   }, [workspace]);
 
-  // Clear the inspector reply (and its attachments) when switching nodes. Picking
-  // a real node also drops the "new conversation" state — that node's thread takes
-  // over the inspector (including the node a seeded turn just created).
+  // Picking a real node drops the "new conversation" state — that node's thread
+  // takes over the inspector (including the node a seeded turn just created).
+  // Drafts are keyed per target, so switching nodes preserves each one rather
+  // than clearing it. A newly selected node has been seen, so it's no longer
+  // "ready".
   useEffect(() => {
-    setReply("");
-    setReplyImages([]);
     if (selectedId) setComposingNew(false);
   }, [selectedId]);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+    if (!selectedId) return;
+    setReadyIds((s) => {
+      if (!s.has(selectedId)) return s;
+      const n = new Set(s);
+      n.delete(selectedId);
+      return n;
+    });
+  }, [selectedId]);
+
+  // Keep the "mid-compose" mirror current so a finishing turn can tell whether
+  // following it would blow away a message you're actively writing.
+  useEffect(() => {
+    composingRef.current = composingNew || reply.trim() !== "" || prompt.trim() !== "";
+  }, [composingNew, reply, prompt]);
 
   // Focus the inspector's composer when a new conversation opens, so you can type
   // straight into the chat window on the right.
@@ -226,12 +302,42 @@ export default function App() {
     setInViewId(active);
   }, []);
 
+  // A turn finished in a tree you weren't watching: drop a dismissible toast that
+  // jumps you there on click, and auto-clears after a while.
+  const pushToast = useCallback((nodeId, label) => {
+    const id = `toast-${toastSeq.current++}`;
+    setToasts((t) => [...t, { id, nodeId, label }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 8000);
+  }, []);
+  const openToast = useCallback((t) => {
+    setSelectedId(t.nodeId);
+    setToasts((ts) => ts.filter((x) => x.id !== t.id));
+  }, []);
+  const dismissToast = useCallback((tid) => {
+    setToasts((ts) => ts.filter((x) => x.id !== tid));
+  }, []);
+
   // Answer a permission prompt (requestId is globally unique) and drop it from
-  // whichever pending node raised it.
+  // whichever pending node raised it. An answered AskUserQuestion isn't a gate
+  // that just disappears — keep its resolved Q&A on the node so it stays in the
+  // conversation flow (the server persists the same thing once the turn lands).
   const onAnswer = useCallback((requestId, behavior, updatedInput) => {
     answerPermission(requestId, behavior, updatedInput);
     setPendings((ps) =>
-      ps.map((p) => ({ ...p, perms: p.perms.filter((q) => q.requestId !== requestId) }))
+      ps.map((p) => {
+        const answered = p.perms.find((q) => q.requestId === requestId);
+        const perms = p.perms.filter((q) => q.requestId !== requestId);
+        if (answered?.tool_name === "AskUserQuestion" && behavior === "allow") {
+          const answers = updatedInput?.answers || {};
+          const qa = (answered.input?.questions || []).map((q) => ({
+            header: q.header || "",
+            question: q.question,
+            answer: answers[q.question] || "",
+          }));
+          return { ...p, perms, questions: [...(p.questions || []), ...qa] };
+        }
+        return { ...p, perms };
+      })
     );
   }, []);
 
@@ -293,6 +399,7 @@ export default function App() {
         prompt: p.label,
         result: p.result,
         perms: p.perms,
+        questions: p.questions,
         turnId: p.turnId,
         auto: p.auto,
         images: p.images,
@@ -390,6 +497,8 @@ export default function App() {
         canFork: !n.streaming && n.kind !== "summary" && n.kind !== "finding" && hasChild.has(n.id),
         // Highlighted as the thread scrolls past its exchange (but not summaries).
         highlighted: n.id === inViewId && n.kind !== "summary",
+        // Finished while you were elsewhere — badge it so you can go when ready.
+        ready: readyIds.has(n.id),
         onAnswer,
         onFork: forkFrom,
       },
@@ -404,7 +513,7 @@ export default function App() {
         animated: n.streaming,
       }));
     return { rfNodes, rfEdges };
-  }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom, toggleSplit, togglePin, findingInfo, dims]);
+  }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom, toggleSplit, togglePin, findingInfo, dims, readyIds]);
 
   // Camera: frame the canvas once, on the initial load, via ReactFlow's own
   // `fitView` prop — and then never move it automatically again. Every automatic
@@ -509,7 +618,7 @@ export default function App() {
       setError(null);
       setPendings((ps) => [
         ...ps,
-        { tempId, parentId: displayParentId, label: text, result: "", perms: [], turnId: null, auto: false, images },
+        { tempId, parentId: displayParentId, label: text, result: "", perms: [], questions: [], turnId: null, auto: false, images },
       ]);
       // Follow the new branch in the chat as it streams.
       setSelectedId(tempId);
@@ -535,14 +644,30 @@ export default function App() {
             // makes `selected` null for a frame, which unmounts the inspector and
             // throws the chat scroll back to the top.
             await refresh();
+            // Decide whether to follow this finished turn into the inspector. We
+            // follow our own branch (the temp id we're still viewing) and an idle
+            // inspector sitting on null or the fork parent — but NEVER yank
+            // selection out from under an active composer, even if it's parked on
+            // null while you seed a new conversation. Read the live refs, not the
+            // closure, which captured stale values when this turn started.
+            const cur = selectedIdRef.current;
+            const followed =
+              cur === tempId ||
+              (!composingRef.current && (cur === null || cur === parentId));
             // Hand selection from the temp id to the real node, then drop the
-            // pending — batched into one render so selection is always valid.
-            // Don't steal selection if you've since moved to a different branch
-            // while this one was thinking.
-            setSelectedId((cur) =>
-              cur === null || cur === parentId || cur === tempId ? node.id : cur
-            );
+            // pending — batched into one render so selection is always valid. The
+            // temp id is going away regardless, so always advance off it.
+            setSelectedId((c) => {
+              if (c === tempId) return node.id;
+              return followed ? node.id : c;
+            });
             setPendings((ps) => ps.filter((p) => p.tempId !== tempId));
+            // Didn't follow it → surface it passively so a reply landing in one
+            // tree can't blow away a message you're writing in another.
+            if (!followed) {
+              setReadyIds((s) => new Set(s).add(node.id));
+              pushToast(node.id, node.label || text);
+            }
           },
           onError: (msg) => {
             aborters.current.delete(tempId);
@@ -553,17 +678,16 @@ export default function App() {
       );
       aborters.current.set(tempId, abort);
     },
-    [modes, newRootMode, rootOf, patchPending, refresh]
+    [modes, newRootMode, rootOf, patchPending, refresh, pushToast]
   );
 
   // Bottom composer: seed a root (nothing selected) or continue the selected node.
   const submit = useCallback(
     (parentId) => {
       startTurn(parentId, prompt, composerImages);
-      setPrompt("");
-      setComposerImages([]);
+      clearDraft(setPromptDrafts, promptKey);
     },
-    [startTurn, prompt, composerImages]
+    [startTurn, prompt, composerImages, promptKey, clearDraft]
   );
 
   // Stop an in-flight turn: abort it (closes the stream, SIGTERMs the CLI child
@@ -600,9 +724,8 @@ export default function App() {
     } else if (selectedId) startTurn(selectedId, reply, replyImages);
     else if (composingNew) startTurn(null, reply, replyImages);
     else return;
-    setReply("");
-    setReplyImages([]);
-  }, [startTurn, selected, selectedId, composingNew, reply, replyImages]);
+    clearDraft(setReplyDrafts, replyKey);
+  }, [startTurn, selected, selectedId, composingNew, reply, replyImages, replyKey, clearDraft]);
 
   const onReset = useCallback(async () => {
     // Stop every in-flight turn (closes its stream, kills the CLI child) before
@@ -614,8 +737,10 @@ export default function App() {
     setSelectedId(null);
     setPendings([]);
     setModes({});
-    setComposerImages([]);
-    setReplyImages([]);
+    setReplyDrafts(new Map());
+    setPromptDrafts(new Map());
+    setReadyIds(new Set());
+    setToasts([]);
     await refresh();
   }, [refresh]);
 
@@ -626,9 +751,9 @@ export default function App() {
   const newConversation = useCallback(() => {
     setSelectedId(null);
     setComposingNew(true);
-    setPrompt("");
-    setComposerImages([]);
-  }, []);
+    clearDraft(setPromptDrafts, "__root__");
+    clearDraft(setReplyDrafts, "__new__");
+  }, [clearDraft]);
 
 
   const empty = nodes.length === 0 && pendings.length === 0;
@@ -679,10 +804,7 @@ export default function App() {
       {/* Composer: seeds the root when empty / nothing selected, else forks. */}
       <div className="composer">
         {error && <div className="error">⚠ {error}</div>}
-        <Thumbnails
-          images={composerImages}
-          onRemove={(id) => setComposerImages((p) => p.filter((img) => img.id !== id))}
-        />
+        <Thumbnails images={composerImages} onRemove={removeComposerImage} />
         <div className="composerRow">
           <span className="target">
             {empty
@@ -694,15 +816,13 @@ export default function App() {
           <input
             ref={inputRef}
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) => setPromptText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit(selected ? selected.id : null)}
-            onPaste={pasteImages(setComposerImages)}
+            onPaste={pasteImages(addComposerImages)}
             placeholder={selected ? "Ask this branch something new…" : "Start a conversation…"}
             autoFocus
           />
-          <AttachButton
-            onAdd={(imgs) => setComposerImages((p) => [...p, ...imgs].slice(0, MAX_IMAGES))}
-          />
+          <AttachButton onAdd={addComposerImages} />
           <ModeSelect
             value={currentMode}
             onChange={setCurrentMode}
@@ -799,26 +919,24 @@ export default function App() {
                 {(n.perms || []).map((p) => (
                   <PermPrompt key={p.requestId} perm={p} onAnswer={onAnswer} />
                 ))}
+                <ResolvedQuestions questions={n.questions} />
               </div>
               )
             )}
           </div>
           <div className="resume">
-            <Thumbnails
-              images={replyImages}
-              onRemove={(id) => setReplyImages((p) => p.filter((img) => img.id !== id))}
-            />
+            <Thumbnails images={replyImages} onRemove={removeReplyImage} />
             <textarea
               ref={replyRef}
               value={reply}
-              onChange={(e) => setReply(e.target.value)}
+              onChange={(e) => setReplyText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   sendReply();
                 }
               }}
-              onPaste={pasteImages(setReplyImages)}
+              onPaste={pasteImages(addReplyImages)}
               placeholder={
                 !selected
                   ? "Ask anything to start a new conversation…"
@@ -863,9 +981,7 @@ export default function App() {
                     title="Permission mode for this conversation"
                   />
                   <div className="resumeActions">
-                    <AttachButton
-                      onAdd={(imgs) => setReplyImages((p) => [...p, ...imgs].slice(0, MAX_IMAGES))}
-                    />
+                    <AttachButton onAdd={addReplyImages} />
                     <button onClick={sendReply} disabled={!reply.trim()}>
                       Send
                     </button>
@@ -876,6 +992,30 @@ export default function App() {
           </div>
           </aside>
         </>
+      )}
+
+      {toasts.length > 0 && (
+        <div className="toasts">
+          {toasts.map((t) => (
+            <button key={t.id} className="toast" onClick={() => openToast(t)}>
+              <span className="toastIco">🌿</span>
+              <span className="toastText">
+                Reply ready — <span className="toastLabel">{t.label}</span>
+              </span>
+              <span
+                className="toastClose"
+                role="button"
+                title="Dismiss"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  dismissToast(t.id);
+                }}
+              >
+                ✕
+              </span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
