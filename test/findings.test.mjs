@@ -64,6 +64,30 @@ Five findings, ranked by severity.
   assert.equal(parseFindings(review).length, 2);
 });
 
+test("the last finding does not swallow the review's closing wrap-up", () => {
+  // The last item has no next-marker boundary, so a trailing "My take: …"
+  // paragraph was landing inside finding #3's card. It belongs on the review, not
+  // the finding.
+  const review = `I found 3 issues:
+
+1. **Race condition** — \`src/cache.ts:42\` drops a write.
+
+2. **Missing null check** — \`handler.ts:88\` may be undefined.
+
+3. **Inconsistent casing** — \`meta.tsx:7\` mixes Title and sentence case.
+
+---
+
+**My take:** #1 is the definite fix. Want me to apply it?`;
+  const items = findingItems(review);
+  assert.equal(items.length, 3);
+  const last = items[2];
+  assert.equal(last.headline, "Inconsistent casing");
+  assert.doesNotMatch(last.body, /My take/);
+  assert.doesNotMatch(last.body, /---/); // the separating rule is dropped too
+  assert.match(last.body, /Title and sentence case/); // the finding itself is kept
+});
+
 test("an ordinary numbered list does not auto-detect", () => {
   const steps = `To set it up:\n\n1. Install the deps\n2. Start the server\n3. Open the page`;
   assert.equal(looksLikeReview(steps), false);

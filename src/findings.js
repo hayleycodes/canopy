@@ -44,6 +44,31 @@ function headlineFor(firstLine) {
   return h;
 }
 
+// The lead-in of a review's closing wrap-up — the paragraph after the last
+// finding where the reviewer steps back ("My take: …", "Overall …", "Bottom
+// line: …"). Distinctly a summary word, not a within-finding subsection like
+// "Fix:" or "Impact:", so trimming on it won't eat a finding's own detail.
+const CLOSING_LEAD =
+  /^\s*(?:#{1,6}\s*)?\*{0,2}\s*(?:my take|my recommendation|overall|in summary|to summari[sz]e|bottom line|net[- ]net|tl;?dr|verdict|conclusion|closing thoughts?|final thoughts?)\b/i;
+
+// A horizontal rule (`---`, `***`, `___`) on its own line.
+const HR = /^\s*([-*_])\1{2,}\s*$/;
+
+// The last finding has no next-marker boundary, so its block runs to the end of
+// the reply and swallows any trailing wrap-up paragraph. Cut the block at a
+// fresh-paragraph closing lead-in (and drop the blank/rule separating it), so a
+// finding card shows only the finding — the wrap-up already lives on the review.
+function trimClosingSummary(block) {
+  for (let i = 1; i < block.length; i++) {
+    if (block[i - 1].trim() !== "") continue; // must begin a new paragraph
+    if (!CLOSING_LEAD.test(block[i])) continue;
+    let cut = i;
+    while (cut > 1 && (block[cut - 1].trim() === "" || HR.test(block[cut - 1]))) cut--;
+    return block.slice(0, cut);
+  }
+  return block;
+}
+
 // Group a reply into items, one per line matching `startRe`. Each item runs from
 // its marker line up to the next, so a finding's continuation lines (details,
 // code refs) come with it.
@@ -55,8 +80,10 @@ function collectItems(lines, startRe) {
   const items = [];
   for (let s = 0; s < starts.length; s++) {
     const from = starts[s];
-    const to = s + 1 < starts.length ? starts[s + 1] : lines.length;
-    const block = lines.slice(from, to);
+    const isLast = s + 1 >= starts.length;
+    const to = isLast ? lines.length : starts[s + 1];
+    let block = lines.slice(from, to);
+    if (isLast) block = trimClosingSummary(block);
     const firstLine = block[0].replace(startRe, "");
     const body = [firstLine, ...block.slice(1)].join("\n").replace(/\s+$/, "");
     items.push({ n: items.length + 1, headline: headlineFor(firstLine), body });
