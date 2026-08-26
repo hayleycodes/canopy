@@ -988,7 +988,9 @@ export default function App() {
                   </div>
                 )}
                 {(() => {
-                  const m = n.streaming ? MODES.find((mo) => mo.value === n.mode) : null;
+                  // Once a turn is flipped to "approve the rest", it's running in
+                  // auto — reflect that on the badge instead of its starting mode.
+                  const m = n.streaming ? MODES.find((mo) => mo.value === (n.auto ? "auto" : n.mode)) : null;
                   return (
                     <div className={`assistantBlock${m ? " tagged" : ""}`}>
                       {m && (
