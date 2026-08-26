@@ -131,6 +131,25 @@ function QuestionPrompt({ requestId, input, onAnswer }) {
   );
 }
 
+// An AskUserQuestion after it's been answered: the question and the human's pick,
+// shown in the conversation flow so the exchange doesn't lose that it happened.
+// Fed the persisted shape [{ header, question, answer }] — from the live pending
+// node once answered, or reconstructed from the transcript on reload.
+export function ResolvedQuestions({ questions = [] }) {
+  if (!questions.length) return null;
+  return (
+    <div className="askResolved">
+      {questions.map((q, i) => (
+        <div key={i} className="askItem">
+          {q.header && <div className="askHeader">{q.header}</div>}
+          <div className="askQuestion">{q.question}</div>
+          <div className="askAnswer">{q.answer || <span className="muted">—</span>}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function PermPrompt({ perm, onAnswer }) {
   const { requestId, tool_name, input } = perm;
   if (tool_name === "AskUserQuestion") {
