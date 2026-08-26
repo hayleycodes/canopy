@@ -223,6 +223,10 @@ async function handleStream(req, res, url) {
     // and store that — otherwise the node loses everything but its final block the
     // instant the turn lands (store.mjs joins the same way when reading from disk).
     let streamed = "";
+    // The final text block on its own — reset whenever a new text block starts, so
+    // it ends up holding only the last one. Split detection uses this (see graph's
+    // addNode) so a review's findings are parsed from the answer, not the narration.
+    let finalBlock = "";
     // Write any attached screenshots to a temp dir and point the CLI prompt at
     // them by path; the stored node keeps the human's original text.
     const imagePaths = writeTurnImages(turnId, images);
@@ -238,12 +242,14 @@ async function handleStream(req, res, url) {
           emittedText
         ) {
           streamed += "\n\n";
+          finalBlock = "";
           send("token", { text: "\n\n" });
         }
         const token = extractToken(evt);
         if (token) {
           emittedText = true;
           streamed += token;
+          finalBlock += token;
           send("token", { text: token });
         }
       }
@@ -254,6 +260,7 @@ async function handleStream(req, res, url) {
       parentId,
       prompt,
       result: streamed || final.result || "",
+      finalResult: finalBlock || final.result || "",
       usage: final.usage,
     });
     // Persist the true fork link so the tree survives compaction, which would

@@ -34,7 +34,7 @@ function tokensFromUsage(u) {
   return { context, output: u.output_tokens || 0 };
 }
 
-export function addNode({ sessionId, parentId = null, prompt, result, usage = null }) {
+export function addNode({ sessionId, parentId = null, prompt, result, finalResult = "", usage = null }) {
   const node = {
     id: sessionId,
     parentId,
@@ -42,6 +42,11 @@ export function addNode({ sessionId, parentId = null, prompt, result, usage = nu
     prompt,
     label: labelFor(prompt),
     result: result ?? "",
+    // Just the turn's final assistant block. `result` joins every block (narration,
+    // scratchpad, answer) for display, but a review's findings live only in the
+    // final answer — split detection keys on this so it doesn't grab a scratchpad
+    // list or absorb trailing wrap-up. Falls back to the full result if unset.
+    finalResult: finalResult || result || "",
     tokens: tokensFromUsage(usage),
   };
   nodes.set(sessionId, node);

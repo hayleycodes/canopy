@@ -249,10 +249,13 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     // A turn with tool calls writes several assistant messages (narrate, call a
     // tool, narrate again); join them all so the persisted node matches what
     // streamed live, rather than collapsing to just the final block.
-    const reply = tail
+    const replies = tail
       .filter((m) => m.role === "assistant" && m.text)
-      .map((m) => m.text)
-      .join("\n\n");
+      .map((m) => m.text);
+    const reply = replies.join("\n\n");
+    // The turn's final block alone — split detection keys on this so a review's
+    // findings come from the answer, not from earlier narration or scratchpad.
+    const finalReply = replies.length ? replies[replies.length - 1] : "";
     // Prefer this node's own new prompt (distinctive per fork); aiTitle is
     // conversation-level and repeats across a tree's branches.
     const label = labelFor(prompt) || s.title || "(untitled)";
@@ -263,6 +266,7 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
       prompt,
       label,
       result: reply,
+      finalResult: finalReply,
       tokens: tokensForTail(tail),
     };
   });

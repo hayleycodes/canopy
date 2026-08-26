@@ -135,9 +135,12 @@ export default function App() {
     const m = new Map();
     for (const n of nodes) {
       if (n.kind === "summary") continue;
-      const items = findingItems(n.result);
+      // Split on the turn's final answer block only — a review's findings live
+      // there, not in the earlier narration/scratchpad that `result` also joins in.
+      const src = n.finalResult ?? n.result;
+      const items = findingItems(src);
       if (items.length < 2) continue;
-      const auto = looksLikeReview(n.result, items);
+      const auto = looksLikeReview(src, items);
       const shown = splitOverride.has(n.id) ? splitOverride.get(n.id) : auto;
       m.set(n.id, { items, shown });
     }
