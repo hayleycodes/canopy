@@ -68,6 +68,28 @@ function textOf(message) {
   return "";
 }
 
+// A tool_result's content, which may be a string or an array of blocks.
+function toolResultText(block) {
+  const c = block?.content;
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) {
+    return c.filter((b) => b.type === "text").map((b) => b.text).join("");
+  }
+  return "";
+}
+
+// AskUserQuestion records the human's picks in its tool_result as
+// `"question"="answer", "question"="answer".` — pull those pairs back out so we
+// can re-attach each answer to its question. (Live turns already have the answer
+// map; this is the disk path for when the transcript is re-read.)
+function parseAnswersText(text) {
+  const map = {};
+  const re = /"([^"]*)"="([^"]*)"/g;
+  let m;
+  while ((m = re.exec(text))) map[m[1]] = m[2];
+  return map;
+}
+
 // Token usage for a node's own turn (the tail after its parent's shared prefix).
 // `context` is the whole prompt the model saw on this turn's LAST response —
 // input + both cache tiers = system + tools + full history so far, i.e. how full
@@ -87,6 +109,10 @@ export function tokensForTail(tail) {
 // Parse one transcript into the bits we need to place it in the tree.
 function parseSession(path, id) {
   const msgs = []; // ordered main-chain messages: { uuid, role, text }
+  // Open AskUserQuestion calls awaiting their answer: tool_use_id -> { questions, msg }.
+  // The answer lands in a later tool_result, so we attach the resolved Q&A back
+  // onto the assistant message that asked it (so it belongs to that turn).
+  const openAsks = new Map();
   let title = null;
   let firstTs = null;
   let lastTs = null;
@@ -104,7 +130,32 @@ function parseSession(path, id) {
     }
     if (d.type === "ai-title" && d.aiTitle) title = d.aiTitle;
     if ((d.type === "user" || d.type === "assistant") && d.uuid && !d.isSidechain) {
-      msgs.push({ uuid: d.uuid, role: d.type, text: textOf(d.message), usage: d.message?.usage || null });
+      const msg = { uuid: d.uuid, role: d.type, text: textOf(d.message), usage: d.message?.usage || null };
+      msgs.push(msg);
+      const content = d.message?.content;
+      if (Array.isArray(content)) {
+        for (const b of content) {
+          if (b.type === "tool_use" && b.name === "AskUserQuestion") {
+            openAsks.set(b.id, { questions: b.input?.questions || [], msg });
+          } else if (b.type === "tool_result" && b.tool_use_id && openAsks.has(b.tool_use_id)) {
+            const { questions, msg: askMsg } = openAsks.get(b.tool_use_id);
+            openAsks.delete(b.tool_use_id);
+            // A rejected/dismissed ask still writes a tool_result, but with no
+            // "question"="answer" pairs — keep only questions the human actually
+            // answered, so a dismissed prompt doesn't show up as an empty Q&A.
+            const answers = parseAnswersText(toolResultText(b));
+            askMsg.questions = (askMsg.questions || []).concat(
+              questions
+                .map((q) => ({
+                  header: q.header || "",
+                  question: q.question,
+                  answer: answers[q.question] || "",
+                }))
+                .filter((q) => q.answer !== "")
+            );
+          }
+        }
+      }
     }
   }
   return { id, msgs, uuids: msgs.map((m) => m.uuid), title, firstTs, lastTs };
@@ -259,6 +310,9 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     // Prefer this node's own new prompt (distinctive per fork); aiTitle is
     // conversation-level and repeats across a tree's branches.
     const label = labelFor(prompt) || s.title || "(untitled)";
+    // Any AskUserQuestion the agent raised during this turn, with the human's
+    // pick, so the resolved Q&A shows in the conversation flow instead of vanishing.
+    const questions = tail.flatMap((m) => m.questions || []);
     return {
       id: s.id,
       parentId: s.parentId,
@@ -267,6 +321,7 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
       label,
       result: reply,
       finalResult: finalReply,
+      questions,
       tokens: tokensForTail(tail),
     };
   });

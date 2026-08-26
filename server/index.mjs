@@ -94,7 +94,11 @@ const queuedTurns = new Map(); // turnId -> { prompt, parentId, mode }
 // we raise a prompt to the human; a pending entry is the promise the MCP gate is
 // blocked on until they click. Both are keyed so answers route back correctly.
 const activeTurns = new Map(); // turnId    -> SSE `send` fn
-const pendingPerms = new Map(); // requestId -> { resolve, input, turnId }
+const pendingPerms = new Map(); // requestId -> { resolve, input, turnId, tool_name }
+// AskUserQuestion answers collected during a turn: turnId -> [{header, question, answer}].
+// Handed to addNode when the turn lands so the resolved Q&A is on the node right
+// away, before its transcript flushes to disk (store.mjs reparses it from there).
+const turnQuestions = new Map();
 // Turns the human switched to auto-approve mid-flight: every permission request
 // for these is allowed without asking. Cleared when the turn ends.
 const autoApproveTurns = new Set(); // turnId
@@ -261,6 +265,7 @@ async function handleStream(req, res, url) {
       prompt,
       result: streamed || final.result || "",
       finalResult: finalBlock || final.result || "",
+      questions: turnQuestions.get(turnId) || [],
       usage: final.usage,
     });
     // Persist the true fork link so the tree survives compaction, which would
@@ -272,6 +277,7 @@ async function handleStream(req, res, url) {
   } finally {
     activeTurns.delete(turnId);
     autoApproveTurns.delete(turnId);
+    turnQuestions.delete(turnId);
     cleanupTurnImages(turnId);
     res.end();
   }
@@ -293,7 +299,7 @@ async function handlePermissionAsk(req, res) {
   send("permission", { requestId, tool_name, input });
 
   const decision = await new Promise((resolve) => {
-    pendingPerms.set(requestId, { resolve, input, turnId });
+    pendingPerms.set(requestId, { resolve, input, turnId, tool_name });
   });
   sendJson(res, 200, decision);
 }
@@ -304,6 +310,19 @@ async function handlePermissionAnswer(req, res) {
   const pend = pendingPerms.get(requestId);
   if (pend) {
     pendingPerms.delete(requestId);
+    // An answered AskUserQuestion isn't a gate — capture the picks so the turn's
+    // node keeps the resolved Q&A instead of it vanishing once the prompt clears.
+    if (behavior === "allow" && pend.tool_name === "AskUserQuestion") {
+      const answers = updatedInput?.answers || {};
+      const qa = (pend.input?.questions || []).map((q) => ({
+        header: q.header || "",
+        question: q.question,
+        answer: answers[q.question] || "",
+      }));
+      const list = turnQuestions.get(pend.turnId) || [];
+      list.push(...qa);
+      turnQuestions.set(pend.turnId, list);
+    }
     pend.resolve(
       behavior === "allow"
         ? { behavior: "allow", updatedInput: updatedInput ?? pend.input ?? {} }
