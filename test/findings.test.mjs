@@ -98,6 +98,35 @@ test("an explanation that merely mentions a finding does not auto-detect", () =>
   assert.equal(findingItems(expand).length, 2);
 });
 
+test("a numbered scenario trace with trailing sections does not auto-detect", () => {
+  // Regression: a walkthrough numbered as steps (Sally → … → Sam), then continuing
+  // into `## ` discussion sections, was split into finding cards. No "found N
+  // issues" framing, so it hit the citation heuristic — and the LAST step swallows
+  // the trailing "**The critical finding:**" prose, whose `…ts:19` ref plus the
+  // first step's ref cleared the "half the items cite a file:line" bar.
+  const trace = `That settles it. Here's the answer to your scenario.
+
+## Tracing your scenario
+
+**Sally → Mitre 10 Bridgetown:**
+1. Sally types "Mitre 10 Bridgetown" as free text. Her nomination is created with \`employerId = null\` (createNomination.ts:76 — no employer lookup at all).
+2. Admin logs a contact → \`ensureNominationEmployer\` creates a brand-new employer record for Mitre 10.
+3. Admin saves to directory → that same employer record flips to \`isInDirectory: true\`.
+
+**Now Sam → also "Mitre 10 Bridgetown":**
+4. Sam types "Mitre 10 Bridgetown" as free text. His nomination is created with \`employerId = null\`.
+
+**The critical finding:** There is no matching logic anywhere — not on log (ensureNominationEmployer.ts:19 just blindly creates a new employer).
+
+## So, directly answering your question
+
+No. Sam's nomination won't auto-link to Sally's employer record.`;
+  assert.equal(looksLikeReview(trace), false);
+  assert.equal(parseFindings(trace), null);
+  // Still splittable by hand if you want it.
+  assert.equal(findingItems(trace).length, 4);
+});
+
 test("prose with no list yields nothing", () => {
   assert.equal(findingItems("Looks good to me, ship it.").length, 0);
   assert.equal(parseFindings("Looks good to me, ship it."), null);

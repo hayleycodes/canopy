@@ -79,6 +79,21 @@ function hasExplicitFindings(text) {
   return /^\s*#{1,6}\s*Finding\s+\d+\b/im.test(text || "");
 }
 
+// A markdown section heading (## …) sitting *after* the numbered list starts means
+// the numbers are steps inside a larger document — a scenario trace, a walkthrough —
+// not a bare findings list. A real un-framed review is just its list; it doesn't
+// resume into fresh titled sections. This matters because the last numbered item
+// has no lower boundary and swallows all the trailing prose, so a discussion that
+// happens to cite a file:line down there wrongly trips the citation heuristic.
+// (Our explicit `### Finding N:` / `### N.` shapes are handled above, and a
+// heading-prefixed item like `### 2.` is an ITEM_START, so it's excluded here.)
+function hasSectionAfterList(text, firstMarker) {
+  const after = firstMarker > 0 ? (text || "").slice(firstMarker) : text || "";
+  return after
+    .split(/\r?\n/)
+    .some((l) => /^\s*#{1,6}\s+\S/.test(l) && !ITEM_START.test(l));
+}
+
 // Does this reply read as a *review* worth auto-splitting, versus an ordinary
 // numbered list we should leave alone? Deliberately conservative — a false split
 // is a confusing surprise, while a missed one is one click of the manual "split"
@@ -94,6 +109,11 @@ export function looksLikeReview(text, items = findingItems(text)) {
   const firstMarker = (text || "").search(/^\s*(?:#{1,6}\s*)?(?:\*\*\s*)?\d{1,3}[.)]\s+/m);
   const leadIn = firstMarker > 0 ? text.slice(0, firstMarker) : "";
   if (FINDINGS_FRAMING.test(leadIn)) return true;
+
+  // Numbers embedded in a larger document (a trace, a walkthrough) rather than a
+  // bare findings list — bail before the citation heuristic below mistakes the
+  // trailing discussion's file refs for finding citations.
+  if (hasSectionAfterList(text, firstMarker)) return false;
 
   const cited = items.filter((it) => FILE_LINE.test(it.body)).length;
   return cited >= Math.ceil(items.length / 2);
