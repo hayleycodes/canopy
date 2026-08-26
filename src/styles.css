@@ -278,6 +278,48 @@ body {
   color: var(--accent);
 }
 
+/* the streaming reply, wrapped so a mode badge can hang off its top edge */
+.assistantBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.assistantBlock.tagged {
+  position: relative;
+  margin-top: 16px; /* room for the badge that straddles the top border */
+}
+/* while thinking, the reply bubble carries the badge — give it more top padding
+   so the text clears the badge, and a wider default so an empty box reads well */
+.assistantBlock.tagged .msg.assistant {
+  padding-top: 16px;
+  min-width: 78%;
+}
+
+/* while a turn is thinking: a badge straddling the top-left edge of the reply
+   bubble, telling you the permission mode it's running under. */
+.modeTag {
+  position: absolute;
+  top: -11px;
+  left: 12px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--card-solid);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 1px 4px rgba(79, 122, 63, 0.2);
+}
+.modeTagIco {
+  font-size: 12px;
+}
+
 /* per-node token usage: context sent this turn + tokens generated */
 .nodeTokens {
   display: flex;

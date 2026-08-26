@@ -3,7 +3,7 @@ import ReactFlow, { Background, Controls, MiniMap } from "reactflow";
 import "reactflow/dist/style.css";
 
 import NodeCard from "./NodeCard.jsx";
-import ModeSelect from "./ModeSelect.jsx";
+import ModeSelect, { MODES } from "./ModeSelect.jsx";
 import PermPrompt, { ResolvedQuestions } from "./PermPrompt.jsx";
 import Markdown from "./Markdown.jsx";
 import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.jsx";
@@ -404,6 +404,7 @@ export default function App() {
         turnId: p.turnId,
         auto: p.auto,
         images: p.images,
+        mode: p.mode,
         streaming: true,
         order: Infinity,
       });
@@ -619,7 +620,7 @@ export default function App() {
       setError(null);
       setPendings((ps) => [
         ...ps,
-        { tempId, parentId: displayParentId, label: text, result: "", perms: [], segments: [], turnId: null, auto: false, images },
+        { tempId, parentId: displayParentId, label: text, result: "", perms: [], segments: [], turnId: null, auto: false, images, mode: turnMode },
       ]);
       // Follow the new branch in the chat as it streams.
       setSelectedId(tempId);
@@ -922,36 +923,49 @@ export default function App() {
                     ))}
                   </div>
                 )}
-                {n.segments?.length ? (
-                  <>
-                    {n.segments.map((seg, i) =>
-                      seg.type === "questions" ? (
-                        <ResolvedQuestions key={i} questions={seg.items} />
-                      ) : (
-                        <div className="msg assistant" key={i}>
-                          <Markdown>{seg.text}</Markdown>
-                          {n.streaming && i === n.segments.length - 1 && <span className="cursor">▋</span>}
+                {(() => {
+                  const m = n.streaming ? MODES.find((mo) => mo.value === n.mode) : null;
+                  return (
+                    <div className={`assistantBlock${m ? " tagged" : ""}`}>
+                      {m && (
+                        <div className="modeTag" title={`Thinking in ${m.label} mode — ${m.desc}`}>
+                          <span className="modeTagIco">{m.icon}</span>
+                          <span className="modeTagName">{m.label}</span>
                         </div>
-                      )
-                    )}
-                    {/* Answered a question and Claude hasn't resumed yet — show the
-                        cursor below the Q&A so the turn still reads as in-progress. */}
-                    {n.streaming && n.segments[n.segments.length - 1]?.type === "questions" && (
-                      <div className="msg assistant">
-                        <span className="cursor">▋</span>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="msg assistant">
-                    {n.result ? (
-                      <Markdown>{n.result}</Markdown>
-                    ) : (
-                      !n.streaming && <span className="muted">—</span>
-                    )}
-                    {n.streaming && <span className="cursor">▋</span>}
-                  </div>
-                )}
+                      )}
+                      {n.segments?.length ? (
+                        <>
+                          {n.segments.map((seg, i) =>
+                            seg.type === "questions" ? (
+                              <ResolvedQuestions key={i} questions={seg.items} />
+                            ) : (
+                              <div className="msg assistant" key={i}>
+                                <Markdown>{seg.text}</Markdown>
+                                {n.streaming && i === n.segments.length - 1 && <span className="cursor">▋</span>}
+                              </div>
+                            )
+                          )}
+                          {/* Answered a question and Claude hasn't resumed yet — show the
+                              cursor below the Q&A so the turn still reads as in-progress. */}
+                          {n.streaming && n.segments[n.segments.length - 1]?.type === "questions" && (
+                            <div className="msg assistant">
+                              <span className="cursor">▋</span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="msg assistant">
+                          {n.result ? (
+                            <Markdown>{n.result}</Markdown>
+                          ) : (
+                            !n.streaming && <span className="muted">—</span>
+                          )}
+                          {n.streaming && <span className="cursor">▋</span>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {(n.perms || []).map((p) => (
                   <PermPrompt key={p.requestId} perm={p} onAnswer={onAnswer} />
                 ))}
