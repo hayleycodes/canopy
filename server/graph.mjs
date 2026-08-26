@@ -34,7 +34,7 @@ function tokensFromUsage(u) {
   return { context, output: u.output_tokens || 0 };
 }
 
-export function addNode({ sessionId, parentId = null, prompt, result, finalResult = "", questions = [], usage = null }) {
+export function addNode({ sessionId, parentId = null, prompt, result, finalResult = "", segments = undefined, usage = null }) {
   const node = {
     id: sessionId,
     parentId,
@@ -47,9 +47,10 @@ export function addNode({ sessionId, parentId = null, prompt, result, finalResul
     // final answer — split detection keys on this so it doesn't grab a scratchpad
     // list or absorb trailing wrap-up. Falls back to the full result if unset.
     finalResult: finalResult || result || "",
-    // Resolved AskUserQuestion Q&A raised during this turn (matches store.mjs), so
-    // the freshly-finished node shows it before its .jsonl flushes to disk.
-    questions,
+    // Ordered prose/Q&A segments when the turn raised an AskUserQuestion (matches
+    // store.mjs), so the resolved Q&A shows inline before the .jsonl flushes to
+    // disk. Undefined for plain turns, which render from `result`.
+    segments,
     tokens: tokensFromUsage(usage),
   };
   nodes.set(sessionId, node);

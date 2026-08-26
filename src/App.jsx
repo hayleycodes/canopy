@@ -319,8 +319,9 @@ export default function App() {
 
   // Answer a permission prompt (requestId is globally unique) and drop it from
   // whichever pending node raised it. An answered AskUserQuestion isn't a gate
-  // that just disappears — keep its resolved Q&A on the node so it stays in the
-  // conversation flow (the server persists the same thing once the turn lands).
+  // that just disappears — record its picks as a segment at this point in the
+  // turn so the resolved Q&A stays inline in the flow (the server persists the
+  // same thing once the turn lands).
   const onAnswer = useCallback((requestId, behavior, updatedInput) => {
     answerPermission(requestId, behavior, updatedInput);
     setPendings((ps) =>
@@ -329,12 +330,12 @@ export default function App() {
         const perms = p.perms.filter((q) => q.requestId !== requestId);
         if (answered?.tool_name === "AskUserQuestion" && behavior === "allow") {
           const answers = updatedInput?.answers || {};
-          const qa = (answered.input?.questions || []).map((q) => ({
+          const items = (answered.input?.questions || []).map((q) => ({
             header: q.header || "",
             question: q.question,
             answer: answers[q.question] || "",
           }));
-          return { ...p, perms, questions: [...(p.questions || []), ...qa] };
+          return { ...p, perms, segments: [...(p.segments || []), { type: "questions", items }] };
         }
         return { ...p, perms };
       })
@@ -399,7 +400,7 @@ export default function App() {
         prompt: p.label,
         result: p.result,
         perms: p.perms,
-        questions: p.questions,
+        segments: p.segments,
         turnId: p.turnId,
         auto: p.auto,
         images: p.images,
@@ -618,7 +619,7 @@ export default function App() {
       setError(null);
       setPendings((ps) => [
         ...ps,
-        { tempId, parentId: displayParentId, label: text, result: "", perms: [], questions: [], turnId: null, auto: false, images },
+        { tempId, parentId: displayParentId, label: text, result: "", perms: [], segments: [], turnId: null, auto: false, images },
       ]);
       // Follow the new branch in the chat as it streams.
       setSelectedId(tempId);
@@ -627,7 +628,20 @@ export default function App() {
         { prompt: text, parentId, mode: turnMode, images },
         {
           onStart: (turnId) => patchPending(tempId, (p) => ({ ...p, turnId })),
-          onToken: (t) => patchPending(tempId, (p) => ({ ...p, result: p.result + t })),
+          onToken: (t) =>
+            patchPending(tempId, (p) => {
+              // Mirror the server: append to the current text segment, or start a
+              // fresh one after a Q&A (dropping its leading block-separator gap).
+              const segments = [...(p.segments || [])];
+              const last = segments[segments.length - 1];
+              if (last && last.type === "text") {
+                segments[segments.length - 1] = { type: "text", text: last.text + t };
+              } else {
+                const trimmed = t.replace(/^\n+/, "");
+                if (trimmed) segments.push({ type: "text", text: trimmed });
+              }
+              return { ...p, result: p.result + t, segments };
+            }),
           onPermission: (req) =>
             patchPending(tempId, (p) => ({ ...p, perms: [...p.perms, req] })),
           onNode: async (node) => {
@@ -908,18 +922,39 @@ export default function App() {
                     ))}
                   </div>
                 )}
-                <div className="msg assistant">
-                  {n.result ? (
-                    <Markdown>{n.result}</Markdown>
-                  ) : (
-                    !n.streaming && <span className="muted">—</span>
-                  )}
-                  {n.streaming && <span className="cursor">▋</span>}
-                </div>
+                {n.segments?.length ? (
+                  <>
+                    {n.segments.map((seg, i) =>
+                      seg.type === "questions" ? (
+                        <ResolvedQuestions key={i} questions={seg.items} />
+                      ) : (
+                        <div className="msg assistant" key={i}>
+                          <Markdown>{seg.text}</Markdown>
+                          {n.streaming && i === n.segments.length - 1 && <span className="cursor">▋</span>}
+                        </div>
+                      )
+                    )}
+                    {/* Answered a question and Claude hasn't resumed yet — show the
+                        cursor below the Q&A so the turn still reads as in-progress. */}
+                    {n.streaming && n.segments[n.segments.length - 1]?.type === "questions" && (
+                      <div className="msg assistant">
+                        <span className="cursor">▋</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="msg assistant">
+                    {n.result ? (
+                      <Markdown>{n.result}</Markdown>
+                    ) : (
+                      !n.streaming && <span className="muted">—</span>
+                    )}
+                    {n.streaming && <span className="cursor">▋</span>}
+                  </div>
+                )}
                 {(n.perms || []).map((p) => (
                   <PermPrompt key={p.requestId} perm={p} onAnswer={onAnswer} />
                 ))}
-                <ResolvedQuestions questions={n.questions} />
               </div>
               )
             )}

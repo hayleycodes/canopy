@@ -95,10 +95,12 @@ const queuedTurns = new Map(); // turnId -> { prompt, parentId, mode }
 // blocked on until they click. Both are keyed so answers route back correctly.
 const activeTurns = new Map(); // turnId    -> SSE `send` fn
 const pendingPerms = new Map(); // requestId -> { resolve, input, turnId, tool_name }
-// AskUserQuestion answers collected during a turn: turnId -> [{header, question, answer}].
-// Handed to addNode when the turn lands so the resolved Q&A is on the node right
-// away, before its transcript flushes to disk (store.mjs reparses it from there).
-const turnQuestions = new Map();
+// Ordered display segments accumulated during a turn: turnId -> [{type,...}].
+// Text tokens append here as they stream; an answered AskUserQuestion pushes a
+// {questions} segment at its position (see handlePermissionAnswer). Handed to
+// addNode when the turn lands so the resolved Q&A shows inline right away, before
+// the transcript flushes to disk (store.mjs rebuilds the same shape from there).
+const turnSegments = new Map();
 // Turns the human switched to auto-approve mid-flight: every permission request
 // for these is allowed without asking. Cleared when the turn ends.
 const autoApproveTurns = new Set(); // turnId
@@ -231,6 +233,22 @@ async function handleStream(req, res, url) {
     // it ends up holding only the last one. Split detection uses this (see graph's
     // addNode) so a review's findings are parsed from the answer, not the narration.
     let finalBlock = "";
+    // The turn as ordered segments, so an AskUserQuestion answered mid-turn shows
+    // inline where it happened rather than at the end. Text tokens append to the
+    // current text segment; handlePermissionAnswer pushes a {questions} segment
+    // (see turnSegments), which makes the next token start a fresh text segment.
+    const segments = [];
+    turnSegments.set(turnId, segments);
+    const pushText = (t) => {
+      const last = segments[segments.length - 1];
+      if (last && last.type === "text") last.text += t;
+      else {
+        // Starting a fresh text segment (turn start, or after a Q&A) — drop the
+        // block-separating blank line so it doesn't lead with empty space.
+        const trimmed = t.replace(/^\n+/, "");
+        if (trimmed) segments.push({ type: "text", text: trimmed });
+      }
+    };
     // Write any attached screenshots to a temp dir and point the CLI prompt at
     // them by path; the stored node keeps the human's original text.
     const imagePaths = writeTurnImages(turnId, images);
@@ -247,6 +265,7 @@ async function handleStream(req, res, url) {
         ) {
           streamed += "\n\n";
           finalBlock = "";
+          pushText("\n\n");
           send("token", { text: "\n\n" });
         }
         const token = extractToken(evt);
@@ -254,18 +273,22 @@ async function handleStream(req, res, url) {
           emittedText = true;
           streamed += token;
           finalBlock += token;
+          pushText(token);
           send("token", { text: token });
         }
       }
     );
 
+    // Only carry segments when the turn actually raised a question; plain turns
+    // render from `result` (matches store.mjs), so we don't change their display.
+    const hadQuestions = segments.some((x) => x.type === "questions");
     const node = addNode({
       sessionId: final.session_id,
       parentId,
       prompt,
       result: streamed || final.result || "",
       finalResult: finalBlock || final.result || "",
-      questions: turnQuestions.get(turnId) || [],
+      segments: hadQuestions ? segments : undefined,
       usage: final.usage,
     });
     // Persist the true fork link so the tree survives compaction, which would
@@ -277,7 +300,7 @@ async function handleStream(req, res, url) {
   } finally {
     activeTurns.delete(turnId);
     autoApproveTurns.delete(turnId);
-    turnQuestions.delete(turnId);
+    turnSegments.delete(turnId);
     cleanupTurnImages(turnId);
     res.end();
   }
@@ -310,18 +333,18 @@ async function handlePermissionAnswer(req, res) {
   const pend = pendingPerms.get(requestId);
   if (pend) {
     pendingPerms.delete(requestId);
-    // An answered AskUserQuestion isn't a gate — capture the picks so the turn's
-    // node keeps the resolved Q&A instead of it vanishing once the prompt clears.
+    // An answered AskUserQuestion isn't a gate — record the picks as a segment at
+    // this point in the turn so the resolved Q&A shows inline (narrate → Q&A →
+    // narrate) instead of vanishing once the prompt clears.
     if (behavior === "allow" && pend.tool_name === "AskUserQuestion") {
       const answers = updatedInput?.answers || {};
-      const qa = (pend.input?.questions || []).map((q) => ({
+      const items = (pend.input?.questions || []).map((q) => ({
         header: q.header || "",
         question: q.question,
         answer: answers[q.question] || "",
       }));
-      const list = turnQuestions.get(pend.turnId) || [];
-      list.push(...qa);
-      turnQuestions.set(pend.turnId, list);
+      const segs = turnSegments.get(pend.turnId);
+      if (segs) segs.push({ type: "questions", items });
     }
     pend.resolve(
       behavior === "allow"

@@ -78,6 +78,24 @@ function toolResultText(block) {
   return "";
 }
 
+// A turn's messages as ordered display segments: runs of assistant prose merged
+// into one text segment (matching the old `\n\n`-joined reply), split apart by a
+// {questions} segment wherever an AskUserQuestion was answered mid-turn. This
+// preserves narrate → ask/answer → narrate order in the conversation flow.
+function buildSegments(tail) {
+  const segs = [];
+  const pushText = (t) => {
+    const last = segs[segs.length - 1];
+    if (last && last.type === "text") last.text += "\n\n" + t;
+    else segs.push({ type: "text", text: t });
+  };
+  for (const m of tail) {
+    if (m.role === "assistant" && m.text) pushText(m.text);
+    if (m.questions?.length) segs.push({ type: "questions", items: m.questions });
+  }
+  return segs;
+}
+
 // AskUserQuestion records the human's picks in its tool_result as
 // `"question"="answer", "question"="answer".` — pull those pairs back out so we
 // can re-attach each answer to its question. (Live turns already have the answer
@@ -310,9 +328,11 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     // Prefer this node's own new prompt (distinctive per fork); aiTitle is
     // conversation-level and repeats across a tree's branches.
     const label = labelFor(prompt) || s.title || "(untitled)";
-    // Any AskUserQuestion the agent raised during this turn, with the human's
-    // pick, so the resolved Q&A shows in the conversation flow instead of vanishing.
-    const questions = tail.flatMap((m) => m.questions || []);
+    // The turn as ordered segments — assistant prose and any AskUserQuestion Q&A
+    // interleaved where they actually happened (narrate → ask/answer → narrate),
+    // so the resolved Q&A reads inline instead of tacked onto the end. Only set
+    // when the turn raised a question; plain turns keep rendering from `result`.
+    const segments = tail.some((m) => m.questions?.length) ? buildSegments(tail) : undefined;
     return {
       id: s.id,
       parentId: s.parentId,
@@ -321,7 +341,7 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
       label,
       result: reply,
       finalResult: finalReply,
-      questions,
+      segments,
       tokens: tokensForTail(tail),
     };
   });
