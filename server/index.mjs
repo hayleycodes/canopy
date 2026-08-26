@@ -26,6 +26,7 @@ import { addNode, getNode, snapshot, reset } from "./graph.mjs";
 import { loadWorkspaceGraph, sessionExists, attachSummaries } from "./store.mjs";
 import { loadLinks, recordLink } from "./lineage.mjs";
 import { loadPins, setPin } from "./pins.mjs";
+import { loadArchived, setArchived } from "./archive.mjs";
 
 const PORT = process.env.CANOPY_PORT || process.env.PORT || 8787;
 // Show only the N most recently active trees so a busy day's conversations don't
@@ -382,6 +383,15 @@ async function handlePin(req, res) {
   sendJson(res, 200, { ok: true });
 }
 
+// POST /api/archive — archive or unarchive a conversation by its root id. An
+// archived tree is pulled off the canvas (regardless of recency) but its
+// transcript stays on disk; it's listed in the drawer so it can be brought back.
+async function handleArchive(req, res) {
+  const { rootId, archived } = await readBody(req);
+  setArchived(WORKSPACE, rootId, !!archived);
+  sendJson(res, 200, { ok: true });
+}
+
 const isLocalHostname = (h) =>
   h === "localhost" || h === "127.0.0.1" || h === "::1";
 
@@ -434,7 +444,7 @@ async function route(req, res) {
     // Disk (the CLI's own transcripts) is the source of truth, so restarts lose
     // nothing. The in-memory graph only backfills a just-finished turn whose
     // .jsonl hasn't flushed to disk yet.
-    const disk = loadWorkspaceGraph(WORKSPACE, MAX_TREES, loadLinks(WORKSPACE), loadPins(WORKSPACE));
+    const disk = loadWorkspaceGraph(WORKSPACE, MAX_TREES, loadLinks(WORKSPACE), loadPins(WORKSPACE), loadArchived(WORKSPACE));
     const have = new Set(disk.nodes.map((n) => n.id));
     const extra = snapshot().nodes.filter((n) => !have.has(n.id));
     // Disk roots already carry a summary header; attachSummaries backfills one for
@@ -443,7 +453,7 @@ async function route(req, res) {
     const edges = nodes
       .filter((n) => n.parentId)
       .map((n) => ({ id: `${n.parentId}->${n.id}`, source: n.parentId, target: n.id }));
-    return sendJson(res, 200, { nodes, edges });
+    return sendJson(res, 200, { nodes, edges, archived: disk.archived });
   }
   if (req.method === "POST" && url.pathname === "/api/turn") {
     return handleCreateTurn(req, res);
@@ -466,6 +476,9 @@ async function route(req, res) {
   }
   if (req.method === "POST" && url.pathname === "/api/pin") {
     return handlePin(req, res);
+  }
+  if (req.method === "POST" && url.pathname === "/api/archive") {
+    return handleArchive(req, res);
   }
 
   sendJson(res, 404, { error: "not found" });

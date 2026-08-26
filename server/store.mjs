@@ -200,7 +200,7 @@ function dirSignature(dir, limit) {
 // in-memory graph produces so the client is unchanged. `limit` keeps only the N
 // most recently active trees (a busy day can create dozens; older ones are still
 // on disk and resumable, just not drawn).
-export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinned = new Set()) {
+export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinned = new Set(), archived = new Set()) {
   const dir = projectDir(workspace);
   if (!dir) return { nodes: [], edges: [] };
 
@@ -212,7 +212,9 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     // Pins change which trees survive the limit, so they're part of the identity
     // too — toggling one must bust the cache.
     const pinsSig = [...pinned].sort().join(",");
-    sig = `${dirSignature(dir, limit)}|links:${linksSig}|pins:${pinsSig}`;
+    // Archives change which trees are drawn too, so they're part of the identity.
+    const archSig = [...archived].sort().join(",");
+    sig = `${dirSignature(dir, limit)}|links:${linksSig}|pins:${pinsSig}|arch:${archSig}`;
     if (graphCache && graphCache.key === sig) return graphCache.result;
   } catch {}
 
@@ -289,16 +291,23 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     }
     return m;
   };
-  if (limit > 0) {
-    const roots = sessions.filter((s) => !s.parentId);
-    const keepRoots = roots
-      .map((r) => ({ id: r.id, act: subtreeMax(r.id) }))
-      .sort((a, b) => b.act.localeCompare(a.act))
-      .slice(0, limit)
-      .map((r) => r.id);
-    // Pinned trees are kept on top of the recency window, so an older pinned
-    // conversation stays on the canvas even once `limit` newer ones exist.
-    for (const r of roots) if (pinned.has(r.id) && !keepRoots.includes(r.id)) keepRoots.push(r.id);
+  const roots = sessions.filter((s) => !s.parentId);
+  if (limit > 0 || archived.size) {
+    let keepRoots;
+    if (limit > 0) {
+      keepRoots = roots
+        .map((r) => ({ id: r.id, act: subtreeMax(r.id) }))
+        .sort((a, b) => b.act.localeCompare(a.act))
+        .slice(0, limit)
+        .map((r) => r.id);
+      // Pinned trees are kept on top of the recency window, so an older pinned
+      // conversation stays on the canvas even once `limit` newer ones exist.
+      for (const r of roots) if (pinned.has(r.id) && !keepRoots.includes(r.id)) keepRoots.push(r.id);
+    } else {
+      keepRoots = roots.map((r) => r.id); // unbounded — everything but archives
+    }
+    // Archived trees are pulled off the canvas regardless of recency or pin.
+    keepRoots = keepRoots.filter((id) => !archived.has(id));
     const keep = new Set();
     const collect = (id) => {
       keep.add(id);
@@ -362,10 +371,16 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     const titled = subs
       .filter((s) => s.title)
       .sort((a, b) => (b.lastTs || "").localeCompare(a.lastTs || ""));
+    // The root's opening prompt as a last resort — computed from the session
+    // directly (not nodeById) so it still works for a root filtered off the
+    // canvas, e.g. an archived tree shown only in the drawer.
+    const root = byId.get(rootId);
+    const rootPrompt = root?.msgs?.find((m) => m.role === "user")?.text || "";
     return (
       titled[0]?.title ||
-      byId.get(rootId)?.title ||
+      root?.title ||
       nodeById.get(rootId)?.label ||
+      labelFor(rootPrompt) ||
       "Conversation"
     );
   };
@@ -394,7 +409,15 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     .filter((n) => n.parentId)
     .map((n) => ({ id: `${n.parentId}->${n.id}`, source: n.parentId, target: n.id }));
 
-  const result = { nodes: outNodes, edges };
+  // The drawer's list of archived trees still present on disk: their root id and
+  // a human title, so each can be shown and unarchived. `treeTitle` reads from
+  // `byId`/`children`, which still hold every session (the filter above only
+  // reassigned `sessions`), so archived roots resolve a title fine.
+  const archivedList = roots
+    .filter((r) => archived.has(r.id))
+    .map((r) => ({ rootId: r.id, label: treeTitle(r.id) }));
+
+  const result = { nodes: outNodes, edges, archived: archivedList };
   if (sig) graphCache = { key: sig, result };
   return result;
 }
