@@ -1,12 +1,26 @@
-// The session graph — Canopy's single source of truth.
+// The session graph — Canopy's in-memory backfill cache.
 //
 // An in-memory tree of nodes, one per Claude session. Each node remembers who it
 // forked from (parentId), the prompt that created it, the assistant's reply, and
 // a short label for the canvas. This is deliberately ephemeral for the scaffold;
 // persistence (disk / sqlite) is a later concern.
+//
+// One tree PER WORKSPACE: the server serves any repo the client asks for (each
+// browser tab is pinned to a workspace via its ?ws= URL), so a just-finished
+// turn in repo A must never leak into repo B's canvas. Keeping a separate node
+// map per workspace path keeps the two apart.
 
-let nodes = new Map(); // session_id -> node
-let seq = 0;
+const graphs = new Map(); // workspace -> { nodes: Map<session_id, node>, seq }
+
+// The per-workspace store, created on first use.
+function forWorkspace(workspace) {
+  let g = graphs.get(workspace);
+  if (!g) {
+    g = { nodes: new Map(), seq: 0 };
+    graphs.set(workspace, g);
+  }
+  return g;
+}
 
 // Cap the in-memory graph. Disk is the source of truth (see index.mjs), so these
 // entries only backfill just-finished turns whose .jsonl hasn't flushed yet —
@@ -34,11 +48,12 @@ function tokensFromUsage(u) {
   return { context, output: u.output_tokens || 0 };
 }
 
-export function addNode({ sessionId, parentId = null, prompt, result, finalResult = "", segments = undefined, usage = null }) {
+export function addNode(workspace, { sessionId, parentId = null, prompt, result, finalResult = "", segments = undefined, usage = null }) {
+  const g = forWorkspace(workspace);
   const node = {
     id: sessionId,
     parentId,
-    order: seq++,
+    order: g.seq++,
     prompt,
     label: labelFor(prompt),
     result: result ?? "",
@@ -53,26 +68,25 @@ export function addNode({ sessionId, parentId = null, prompt, result, finalResul
     segments,
     tokens: tokensFromUsage(usage),
   };
-  nodes.set(sessionId, node);
+  g.nodes.set(sessionId, node);
   // Evict oldest-inserted entries once over the cap (Map keeps insertion order).
-  while (nodes.size > MAX_NODES) nodes.delete(nodes.keys().next().value);
+  while (g.nodes.size > MAX_NODES) g.nodes.delete(g.nodes.keys().next().value);
   return node;
 }
 
-export function getNode(id) {
-  return nodes.get(id) ?? null;
+export function getNode(workspace, id) {
+  return forWorkspace(workspace).nodes.get(id) ?? null;
 }
 
 // The whole graph as plain data for the client: flat node list + parent edges.
-export function snapshot() {
-  const list = [...nodes.values()].sort((a, b) => a.order - b.order);
+export function snapshot(workspace) {
+  const list = [...forWorkspace(workspace).nodes.values()].sort((a, b) => a.order - b.order);
   const edges = list
     .filter((n) => n.parentId)
     .map((n) => ({ id: `${n.parentId}->${n.id}`, source: n.parentId, target: n.id }));
   return { nodes: list, edges };
 }
 
-export function reset() {
-  nodes = new Map();
-  seq = 0;
+export function reset(workspace) {
+  graphs.set(workspace, { nodes: new Map(), seq: 0 });
 }

@@ -27,6 +27,7 @@ import { loadWorkspaceGraph, sessionExists, attachSummaries } from "./store.mjs"
 import { loadLinks, recordLink } from "./lineage.mjs";
 import { loadPins, setPin } from "./pins.mjs";
 import { loadArchived, setArchived } from "./archive.mjs";
+import { loadRecent, recordRecent, normalizeWorkspace, isWorkspaceDir } from "./recent.mjs";
 
 const PORT = process.env.CANOPY_PORT || process.env.PORT || 8787;
 // Show only the N most recently active trees so a busy day's conversations don't
@@ -106,16 +107,30 @@ const turnSegments = new Map();
 // for these is allowed without asking. Cleared when the turn ends.
 const autoApproveTurns = new Set(); // turnId
 
-// The repo every turn operates in — where forks read/edit code and where a
-// future --ide connection points. Resolve once at startup so it's unambiguous.
+// One server serves ANY repo: the workspace is chosen per request by the client
+// (each browser tab pins itself to a repo via ?ws=), so you launch Canopy once
+// and switch repos in-app instead of running a server-per-repo on its own port.
+//
+// This is only the DEFAULT a fresh tab opens with when it names no repo of its
+// own. Resolve it once at startup, same precedence as before.
 //   --workspace <path>  >  CANOPY_WORKSPACE  >  where the server was launched
-function resolveWorkspace() {
+function resolveDefaultWorkspace() {
   const flagIdx = process.argv.indexOf("--workspace");
   const raw =
     (flagIdx !== -1 && process.argv[flagIdx + 1]) || process.env.CANOPY_WORKSPACE || process.cwd();
   return resolve(raw);
 }
-const WORKSPACE = resolveWorkspace();
+const DEFAULT_WORKSPACE = resolveDefaultWorkspace();
+
+// A request names its workspace (query param on GETs, body field on POSTs). We
+// resolve it to a canonical path and require it to be an existing directory, so
+// no turn can ever run against a typo'd or nonexistent cwd. Returns null when the
+// path is missing or not a real directory — the caller answers 400.
+function validWorkspace(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  const path = normalizeWorkspace(raw);
+  return isWorkspaceDir(path) ? path : null;
+}
 
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
@@ -155,19 +170,25 @@ function extractToken(evt) {
 // (parent exists, mode is allowed) happens here so the client gets a clean error
 // synchronously, before it opens the SSE stream.
 async function handleCreateTurn(req, res) {
-  const { prompt, parentId = null, mode = "default", images = [] } = await readBody(req);
+  const { prompt, parentId = null, mode = "default", images = [], workspace: rawWs } = await readBody(req);
   if (!prompt || typeof prompt !== "string") {
     return sendJson(res, 400, { error: "prompt is required" });
   }
+  const workspace = validWorkspace(rawWs);
+  if (!workspace) {
+    return sendJson(res, 400, { error: "unknown or missing workspace" });
+  }
   // The parent may live only on disk (started in VS Code, or before this server
   // came up) and never entered the in-memory graph — accept either source.
-  if (parentId && !getNode(parentId) && !sessionExists(WORKSPACE, parentId)) {
+  if (parentId && !getNode(workspace, parentId) && !sessionExists(workspace, parentId)) {
     return sendJson(res, 404, { error: `unknown parentId: ${parentId}` });
   }
   const safeMode = ALLOWED_MODES.has(mode) ? mode : "default";
   const safeImages = Array.isArray(images) ? images.slice(0, MAX_IMAGES) : [];
   const turnId = randomUUID();
-  queuedTurns.set(turnId, { prompt, parentId, mode: safeMode, images: safeImages });
+  // Pin the turn to its workspace now; the stream (claimed later by turnId) reads
+  // it back so a repo switch mid-flight can't change where this turn runs.
+  queuedTurns.set(turnId, { prompt, parentId, mode: safeMode, images: safeImages, workspace });
   // Don't leak a turn the browser never comes back to stream.
   setTimeout(() => queuedTurns.delete(turnId), TURN_CLAIM_MS).unref?.();
   return sendJson(res, 200, { turnId });
@@ -180,7 +201,7 @@ async function handleStream(req, res, url) {
   const queued = turnId ? queuedTurns.get(turnId) : null;
   if (!queued) return sendJson(res, 404, { error: "unknown or expired turn" });
   queuedTurns.delete(turnId); // claimed — a turnId streams exactly once
-  const { prompt, parentId, mode, images } = queued;
+  const { prompt, parentId, mode, images, workspace } = queued;
 
   res.writeHead(200, {
     "content-type": "text/event-stream",
@@ -256,7 +277,7 @@ async function handleStream(req, res, url) {
     const cliPrompt = promptWithImages(prompt, imagePaths);
     const final = await runStream(
       cliPrompt,
-      { parentId, mode, turnId, port: PORT, cwd: WORKSPACE, signal: ac.signal },
+      { parentId, mode, turnId, port: PORT, cwd: workspace, signal: ac.signal },
       (evt) => {
         const inner = evt.type === "stream_event" ? evt.event : evt;
         if (
@@ -283,7 +304,7 @@ async function handleStream(req, res, url) {
     // Only carry segments when the turn actually raised a question; plain turns
     // render from `result` (matches store.mjs), so we don't change their display.
     const hadQuestions = segments.some((x) => x.type === "questions");
-    const node = addNode({
+    const node = addNode(workspace, {
       sessionId: final.session_id,
       parentId,
       prompt,
@@ -294,7 +315,7 @@ async function handleStream(req, res, url) {
     });
     // Persist the true fork link so the tree survives compaction, which would
     // otherwise erase the uuid prefix store.mjs uses to reconstruct lineage.
-    if (parentId) recordLink(WORKSPACE, final.session_id, parentId);
+    if (parentId) recordLink(workspace, final.session_id, parentId);
     send("node", node);
   } catch (e) {
     send("error", { message: e.message });
@@ -378,8 +399,10 @@ async function handlePermissionAuto(req, res) {
 // POST /api/pin — pin or unpin a conversation by its root id, so it stays on the
 // canvas even once `MAX_TREES` newer conversations exist.
 async function handlePin(req, res) {
-  const { rootId, pinned } = await readBody(req);
-  setPin(WORKSPACE, rootId, !!pinned);
+  const { rootId, pinned, workspace: rawWs } = await readBody(req);
+  const workspace = validWorkspace(rawWs);
+  if (!workspace) return sendJson(res, 400, { error: "unknown or missing workspace" });
+  setPin(workspace, rootId, !!pinned);
   sendJson(res, 200, { ok: true });
 }
 
@@ -387,8 +410,10 @@ async function handlePin(req, res) {
 // archived tree is pulled off the canvas (regardless of recency) but its
 // transcript stays on disk; it's listed in the drawer so it can be brought back.
 async function handleArchive(req, res) {
-  const { rootId, archived } = await readBody(req);
-  setArchived(WORKSPACE, rootId, !!archived);
+  const { rootId, archived, workspace: rawWs } = await readBody(req);
+  const workspace = validWorkspace(rawWs);
+  if (!workspace) return sendJson(res, 400, { error: "unknown or missing workspace" });
+  setArchived(workspace, rootId, !!archived);
   sendJson(res, 200, { ok: true });
 }
 
@@ -438,15 +463,27 @@ async function route(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (req.method === "GET" && url.pathname === "/api/config") {
-    return sendJson(res, 200, { workspace: WORKSPACE });
+    // A fresh tab that names no repo opens on defaultWorkspace; the switcher is
+    // seeded from the recently-opened list.
+    return sendJson(res, 200, { defaultWorkspace: DEFAULT_WORKSPACE, recent: loadRecent() });
+  }
+  if (req.method === "POST" && url.pathname === "/api/workspaces/open") {
+    // The client is switching to a repo: validate it exists, remember it for the
+    // switcher, and hand back the canonical path the tab should pin itself to.
+    const { path } = await readBody(req);
+    const workspace = validWorkspace(path);
+    if (!workspace) return sendJson(res, 400, { error: "not a directory" });
+    return sendJson(res, 200, { workspace, recent: recordRecent(workspace) });
   }
   if (req.method === "GET" && url.pathname === "/api/graph") {
+    const workspace = validWorkspace(url.searchParams.get("workspace"));
+    if (!workspace) return sendJson(res, 400, { error: "unknown or missing workspace" });
     // Disk (the CLI's own transcripts) is the source of truth, so restarts lose
     // nothing. The in-memory graph only backfills a just-finished turn whose
     // .jsonl hasn't flushed to disk yet.
-    const disk = loadWorkspaceGraph(WORKSPACE, MAX_TREES, loadLinks(WORKSPACE), loadPins(WORKSPACE), loadArchived(WORKSPACE));
+    const disk = loadWorkspaceGraph(workspace, MAX_TREES, loadLinks(workspace), loadPins(workspace), loadArchived(workspace));
     const have = new Set(disk.nodes.map((n) => n.id));
-    const extra = snapshot().nodes.filter((n) => !have.has(n.id));
+    const extra = snapshot(workspace).nodes.filter((n) => !have.has(n.id));
     // Disk roots already carry a summary header; attachSummaries backfills one for
     // any in-memory `extra` root so its column isn't left heading-less.
     const nodes = attachSummaries([...disk.nodes, ...extra]);
@@ -462,7 +499,10 @@ async function route(req, res) {
     return handleStream(req, res, url);
   }
   if (req.method === "POST" && url.pathname === "/api/reset") {
-    reset();
+    const { workspace: rawWs } = await readBody(req);
+    const workspace = validWorkspace(rawWs);
+    if (!workspace) return sendJson(res, 400, { error: "unknown or missing workspace" });
+    reset(workspace);
     return sendJson(res, 200, { ok: true });
   }
   if (req.method === "POST" && url.pathname === "/api/permission/ask") {
@@ -491,5 +531,5 @@ sweepStaleConfigs(PORT);
 // the API must never be reachable from other machines on the network.
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`🌳 Canopy server on http://localhost:${PORT}`);
-  console.log(`   workspace: ${WORKSPACE}`);
+  console.log(`   default workspace: ${DEFAULT_WORKSPACE}`);
 });
