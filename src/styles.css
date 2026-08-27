@@ -958,6 +958,44 @@ button.stopBtn:hover {
   background: transparent;
   overflow-wrap: inherit;
 }
+/* Multi-line blocks reserve a top strip so the whole-block "copy" button never
+   overlaps the first line's own per-line button. */
+.md pre.multiline {
+  padding-top: 24px;
+}
+/* Each line of a multi-line block is its own hover target so a per-line copy
+   button can sit at its right edge. Pad the right so the button never overlaps
+   the code. */
+.md pre code .codeLine {
+  display: block;
+  position: relative;
+  padding-right: 56px;
+}
+.lineCopyBtn {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  padding: 0 6px;
+  font-size: 10px;
+  font-family: inherit;
+  line-height: 16px;
+  color: var(--muted);
+  background: var(--card-solid);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.md pre code .codeLine:hover .lineCopyBtn,
+.lineCopyBtn:focus-visible {
+  opacity: 1;
+}
+.lineCopyBtn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
 .md a {
   color: var(--accent);
 }

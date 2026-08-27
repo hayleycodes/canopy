@@ -2,23 +2,49 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-// A fenced code block with a hover "copy" button. Pulls the raw text out of the
-// rendered children so the button copies exactly what's shown.
-function CodeBlock({ children, ...props }) {
+// A copy button that flashes a checkmark for a moment after copying. Shared by
+// the whole-block button and the per-line buttons.
+function CopyButton({ text, className }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    const text = codeText(children);
     navigator.clipboard?.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     });
   };
   return (
-    <pre {...props}>
-      <button className="copyBtn nodrag" onClick={copy} title="Copy">
-        {copied ? "✓ copied" : "copy"}
-      </button>
-      {children}
+    <button className={className} onClick={copy} title="Copy">
+      {copied ? "✓ copied" : "copy"}
+    </button>
+  );
+}
+
+// A fenced code block. A multi-line block often bundles several independent
+// commands (e.g. `cd …` then `yarn test`), and one copy button that grabs all of
+// them is useless when you need to run them one at a time — so each line gets its
+// own hover copy button, plus a whole-block button for when you do want it all.
+function CodeBlock({ children, ...props }) {
+  const text = codeText(children).replace(/\n$/, "");
+  const lines = text.split("\n");
+  const multi = lines.length > 1;
+  return (
+    <pre {...props} className={multi ? "multiline" : undefined}>
+      <CopyButton className="copyBtn nodrag" text={text} />
+      {multi ? (
+        <code>
+          {lines.map((line, i) => (
+            <span className="codeLine" key={i}>
+              {line || " "}
+              {line.trim() && (
+                <CopyButton className="lineCopyBtn nodrag" text={line} />
+              )}
+              {"\n"}
+            </span>
+          ))}
+        </code>
+      ) : (
+        children
+      )}
     </pre>
   );
 }
