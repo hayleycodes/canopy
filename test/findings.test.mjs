@@ -130,6 +130,47 @@ The same derivation runs twice.`;
   assert.match(items[0].body, /StudentUiProvider\.tsx:12/);
 });
 
+test("splits a review whose findings are emoji-tagged headings with a trailing clean section", () => {
+  // The real shape that slipped through: the code-review skill emits findings as
+  // `## 🚩 N.` headings — the severity emoji sits AFTER the hashes, not before —
+  // and closes with a `### Checked and clean` section. The emoji-after-hash
+  // defeated the item-start match, and once fixed the trailing section tripped the
+  // scenario-trace gate. Heading-style findings should split regardless.
+  const review = `Here's the review of **PR 5567** — a backend-only port. Two genuine correctness findings surfaced.
+
+---
+
+## 🚩 1. Two consecutive \`choice\` turns produce a broken React Flow graph
+
+**\`transformConversationsToReactFlow.ts:970\`**
+
+Only *dialogue* turns consume \`pendingConverge\`, so back-to-back choices dangle.
+
+## 🚩 2. Unit introduction blocks silently dropped when there are zero sections
+
+**\`3-content.ts:261\`**
+
+If \`finalised.sections\` is empty, the intro blocks never reach the guide.
+
+---
+
+### Checked and clean (not findings)
+- \`unitService.ts:26\` — nullable field is safe.
+- \`pipelineInput.ts\` — defaults fixed.
+
+Both findings are edge cases, so this is a low-risk port.`;
+  const items = findingItems(review);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].headline, "Two consecutive choice turns produce a broken React Flow graph");
+  assert.equal(items[1].headline, "Unit introduction blocks silently dropped when there are zero sections");
+  assert.ok(looksLikeReview(review));
+  assert.equal(parseFindings(review).length, 2);
+  // The last finding must not swallow the trailing clean section or wrap-up.
+  assert.doesNotMatch(items[1].body, /Checked and clean/);
+  assert.doesNotMatch(items[1].body, /low-risk port/);
+  assert.match(items[1].body, /intro blocks never reach the guide/);
+});
+
 test("an explanation that merely mentions a finding does not auto-detect", () => {
   // Regression: a reply expanding on ONE finding, whose body is a numbered list
   // of the functions involved, was wrongly split into finding cards — the word

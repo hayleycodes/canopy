@@ -28,10 +28,11 @@ const FINDING_HEADING = /^\s*#{1,6}\s*Finding\s+\d+\s*[:.\-–—)]?\s+/i;
 // The leading marker of a numbered item: "1.", "2)". A review not written to our
 // format often numbers each finding as a *heading* ("### 1. …") or bolds the
 // number ("**1.** …"), so tolerate a leading `#` heading prefix and/or `**`.
-// Tools like the code-review skill also prefix a severity emoji ("🔴 **1.** …"),
-// so allow an optional leading pictographic marker (with its variation-selector /
-// ZWJ bytes) before the heading/bold.
-const ITEM_START = /^\s*(?:[\p{Extended_Pictographic}️‍]+\s*)?(?:#{1,6}\s*)?(?:\*\*\s*)?(\d{1,3})[.)]\s+/u;
+// Tools like the code-review skill also prefix a severity emoji — and it may sit
+// either before the heading ("🔴 **1.** …") or *after* the hashes ("## 🚩 1. …"),
+// so allow an optional pictographic marker (with its variation-selector / ZWJ
+// bytes) in both positions.
+const ITEM_START = /^\s*(?:[\p{Extended_Pictographic}️‍]+\s*)?(?:#{1,6}\s*)?(?:[\p{Extended_Pictographic}️‍]+\s*)?(?:\*\*\s*)?(\d{1,3})[.)]\s+/u;
 
 // One finding's headline — the short thing shown on its card. Prefer a bold
 // **lead**, else the text up to the first dash/colon separator, else a trimmed
@@ -55,13 +56,16 @@ const CLOSING_LEAD =
 const HR = /^\s*([-*_])\1{2,}\s*$/;
 
 // The last finding has no next-marker boundary, so its block runs to the end of
-// the reply and swallows any trailing wrap-up paragraph. Cut the block at a
-// fresh-paragraph closing lead-in (and drop the blank/rule separating it), so a
-// finding card shows only the finding — the wrap-up already lives on the review.
+// the reply and swallows any trailing wrap-up. Cut the block at the first
+// fresh-paragraph boundary — either a closing lead-in ("Overall …") or a new
+// section heading that isn't itself a finding ("### Checked and clean") — and drop
+// the blank/rule separating it, so a finding card shows only the finding. The
+// trailing content already lives on the review node.
 function trimClosingSummary(block) {
   for (let i = 1; i < block.length; i++) {
     if (block[i - 1].trim() !== "") continue; // must begin a new paragraph
-    if (!CLOSING_LEAD.test(block[i])) continue;
+    const isSection = /^\s*#{1,6}\s+\S/.test(block[i]) && !ITEM_START.test(block[i]);
+    if (!CLOSING_LEAD.test(block[i]) && !isSection) continue;
     let cut = i;
     while (cut > 1 && (block[cut - 1].trim() === "" || HR.test(block[cut - 1]))) cut--;
     return block.slice(0, cut);
@@ -136,14 +140,19 @@ export function looksLikeReview(text, items = findingItems(text)) {
   if (items.length < 2) return false;
 
   // The text before the first numbered item — where "I found 3 issues:" lives.
-  const firstMarker = (text || "").search(/^\s*(?:[\p{Extended_Pictographic}️‍]+\s*)?(?:#{1,6}\s*)?(?:\*\*\s*)?\d{1,3}[.)]\s+/mu);
+  const firstMarker = (text || "").search(/^\s*(?:[\p{Extended_Pictographic}️‍]+\s*)?(?:#{1,6}\s*)?(?:[\p{Extended_Pictographic}️‍]+\s*)?(?:\*\*\s*)?\d{1,3}[.)]\s+/mu);
   const leadIn = firstMarker > 0 ? text.slice(0, firstMarker) : "";
   if (FINDINGS_FRAMING.test(leadIn)) return true;
 
   // Numbers embedded in a larger document (a trace, a walkthrough) rather than a
   // bare findings list — bail before the citation heuristic below mistakes the
-  // trailing discussion's file refs for finding citations.
-  if (hasSectionAfterList(text, firstMarker)) return false;
+  // trailing discussion's file refs for finding citations. Skipped when the items
+  // are themselves markdown headings ("## 🚩 1. …"): a prose scenario trace
+  // doesn't promote each step to a heading, so a following section (e.g. a review's
+  // "### Checked and clean" list) is expected structure, not a document body.
+  const markerLine = (text || "").split(/\r?\n/).find((l) => ITEM_START.test(l)) || "";
+  const headingStyle = /^\s*#{1,6}\s/.test(markerLine);
+  if (!headingStyle && hasSectionAfterList(text, firstMarker)) return false;
 
   const cited = items.filter((it) => FILE_LINE.test(it.body)).length;
   return cited >= Math.ceil(items.length / 2);
