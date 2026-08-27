@@ -185,6 +185,35 @@ export default function App() {
     []
   );
 
+  // Drag a screenshot straight onto a composer. `dragZone` names the container
+  // currently under a file drag so it can highlight; the drop handler is bound
+  // to a draft's add-images fn, mirroring pasteImages.
+  const [dragZone, setDragZone] = useState(null);
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+  const dragOver = useCallback(
+    (zone) => (e) => {
+      if (!hasFiles(e)) return; // let non-file drags (text selection) through
+      e.preventDefault();
+      setDragZone(zone);
+    },
+    []
+  );
+  const dragLeave = useCallback((e) => {
+    // ignore moves between children of the same container
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    setDragZone(null);
+  }, []);
+  const dropImages = useCallback(
+    (addImages) => async (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDragZone(null);
+      const imgs = await filesToImages(e.dataTransfer?.files || []);
+      if (imgs.length) addImages(imgs);
+    },
+    []
+  );
+
   // Where each composer's draft lives. The inspector reply follows the selected
   // node (or "__new__" while seeding a fresh conversation); the bottom composer
   // follows the node it would fork from (or "__root__" when nothing's selected).
@@ -976,7 +1005,12 @@ export default function App() {
       </div>
 
       {/* Composer: seeds the root when empty / nothing selected, else forks. */}
-      <div className="composer">
+      <div
+        className={`composer${dragZone === "composer" ? " dragging" : ""}`}
+        onDragOver={dragOver("composer")}
+        onDragLeave={dragLeave}
+        onDrop={dropImages(addComposerImages)}
+      >
         {error && <div className="error">⚠ {error}</div>}
         <Thumbnails images={composerImages} onRemove={removeComposerImage} />
         <div className="composerRow">
@@ -1134,7 +1168,12 @@ export default function App() {
               )
             )}
           </div>
-          <div className="resume">
+          <div
+            className={`resume${dragZone === "reply" ? " dragging" : ""}`}
+            onDragOver={dragOver("reply")}
+            onDragLeave={dragLeave}
+            onDrop={dropImages(addReplyImages)}
+          >
             <Thumbnails images={replyImages} onRemove={removeReplyImage} />
             <textarea
               ref={replyRef}

@@ -643,6 +643,11 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.composer.dragging .composerRow {
+  border-color: var(--accent);
+  border-style: dashed;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
 .composer input {
   flex: 1;
   background: transparent;
@@ -1104,6 +1109,11 @@ button.stopBtn:hover {
 }
 .resume textarea:focus {
   border-color: var(--accent);
+}
+.resume.dragging textarea {
+  border-color: var(--accent);
+  border-style: dashed;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 .resume textarea::placeholder {
   color: var(--muted);
