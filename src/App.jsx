@@ -745,13 +745,14 @@ export default function App() {
   }, []);
 
   // Switch a live turn to auto-approve so it stops prompting for permissions —
-  // the escape hatch when you started a turn in manual mode by accident. Clears
-  // any prompts already showing, since the server has just allowed them.
-  const enableAuto = useCallback(
-    (tempId, turnId) => {
+  // the escape hatch when you started a turn in manual mode by accident.
+  // Enabling clears any prompts already showing (the server has just allowed
+  // them); disabling — changed your mind — goes back to asking for what's left.
+  const setAuto = useCallback(
+    (tempId, turnId, enabled) => {
       if (!turnId) return;
-      setTurnAuto(turnId, true);
-      patchPending(tempId, (p) => ({ ...p, auto: true, perms: [] }));
+      setTurnAuto(turnId, enabled);
+      patchPending(tempId, (p) => (enabled ? { ...p, auto: true, perms: [] } : { ...p, auto: false }));
     },
     [patchPending]
   );
@@ -1068,13 +1069,18 @@ export default function App() {
               {selected?.streaming ? (
                 <>
                   {selected.auto ? (
-                    <span className="autoOn" title="Approving the rest of this turn's requests without asking">
-                      ⚡ approving the rest
-                    </span>
+                    <button
+                      className="ghost autoOn"
+                      onClick={() => setAuto(selected.id, selected.turnId, false)}
+                      disabled={!selected.turnId}
+                      title="Changed your mind — go back to asking before the rest of this turn's permission requests"
+                    >
+                      ⚡ approving the rest — cancel
+                    </button>
                   ) : (
                     <button
                       className="ghost"
-                      onClick={() => enableAuto(selected.id, selected.turnId)}
+                      onClick={() => setAuto(selected.id, selected.turnId, true)}
                       disabled={!selected.turnId}
                       title="Stop prompting — approve the rest of this turn's permission requests without asking"
                     >
