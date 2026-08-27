@@ -45,10 +45,39 @@ Browser (localhost)  →  Local Node server  →  Claude Code CLI  →  VS Code
   offering account/claude.ai login. Each dev runs their own copy against their
   own account. This is the *only* permitted shape of "put it out to the world,"
   and it happens to be the same architecture we'd build anyway.
-- **No Electron.** Audience is devs; a browser tab + local server is fine.
-  (Tauri wrap is a possible later ergonomic nicety, never a requirement.)
+- **No Electron.** Audience is devs; a browser tab + local server is fine. A
+  **Tauri** wrap is the named later upgrade, and it buys exactly one thing: a
+  native "Open Folder…" dialog yielding a real filesystem path (a browser tab
+  can't — its file APIs are sandboxed). It replaces the paste-a-path field and
+  nothing else changes. Not a requirement; the CLI must be installed anyway, so
+  Electron's bundle-a-runtime advantage is moot and Tauri's thin shell wins.
 - **Stack:** Vite + React + a canvas lib (e.g. React Flow) front-end; a small
   local Node server that shells out to the CLI.
+
+### The workspace model — one server, many repos (implemented)
+
+You launch Canopy **once** and pick the repo from inside it, instead of running a
+server-per-repo and juggling which port maps to which repo. The refactor that
+made this true:
+
+- **The server is stateless about workspace.** It no longer resolves one
+  `WORKSPACE` at boot; every request names its repo (query param on GETs, body
+  field on POSTs), validated to an existing directory. `--workspace` /
+  `CANOPY_WORKSPACE` survive only as the *default* a fresh tab opens with.
+- **Each browser tab pins itself to a repo via a `?ws=<path>` URL param.** The
+  URL is per-tab, so **two repos on screen at once is just two tabs** — and the
+  URL says which is which, which is the whole point (no more "which port?").
+- **Switching a tab's repo is a navigation** to a new `?ws=`, i.e. a full reload.
+  That tears down the old repo's canvas and in-flight turns for free, so there's
+  no hand-written teardown to get wrong.
+- **Everything that persists was already keyed by workspace path on disk** — the
+  CLI's own transcripts under `~/.claude/projects/<encoded>/`, plus Canopy's
+  pins/lineage/archives under `~/.canopy/`. So switching is just pointing the
+  reads at another path; nothing had to migrate. The only in-memory state that
+  needed keying was the node backfill cache (now one tree per workspace).
+- **A recent-repos list** (`~/.canopy/recent.json`) feeds the in-app switcher.
+  Opening a repo is: pick a recent one, or paste a path (the seam a Tauri folder
+  dialog replaces later).
 
 ### The fork primitive (verified native)
 

@@ -71,35 +71,29 @@ runs on your Claude account. That single fact decides the architecture.
 ```bash
 npm install
 
-# Point Canopy at the repo its turns should run in, then start server + web:
+# Start server + web. Canopy opens on a default repo (the one you launched from,
+# or CANOPY_WORKSPACE if set) — you switch repos in-app from there.
 CANOPY_WORKSPACE=/path/to/your/project npm run dev
 ```
 
-Open **http://localhost:5173**. (With no `CANOPY_WORKSPACE`, it uses the
+Open **http://localhost:5173**. (With no `CANOPY_WORKSPACE`, the default is the
 directory you launched from.) The web app is on `:5173` and proxies `/api` to
 the server on `:8787`.
 
 Seed a conversation in the composer, click a node to open its chat, and use the
 `⑂` button (or reply in the chat) to branch.
 
-### Multiple workspaces at once
+### Multiple repos
 
-One instance serves one workspace, fixed at startup. To work across several
-repos, run one instance per workspace on its own ports. Each needs a distinct
-`CANOPY_PORT` (the API server); the web port auto-increments, or set
-`CANOPY_WEB_PORT` to pin it:
+You launch Canopy **once** and pick the repo from inside it — no running a server
+per project, no juggling which port maps to which repo. Switch the current tab's
+repo from the **📁 switcher** in the top bar (a recently-opened list, or paste a
+path).
 
-```bash
-# terminal 1 — project A on the defaults (api 8787, web 5173)
-CANOPY_WORKSPACE=/path/to/project-a npm run dev
-
-# terminal 2 — project B on its own ports
-CANOPY_WORKSPACE=/path/to/project-b CANOPY_PORT=8788 CANOPY_WEB_PORT=5174 npm run dev
-```
-
-Then open http://localhost:5173 for A and http://localhost:5174 for B. Each tab
-is an independent canvas over its own repo; the Vite dev server proxies `/api` to
-the matching `CANOPY_PORT`.
+Each tab pins its repo in the URL as `?ws=/path/to/repo`, so **two repos on
+screen at once is just two tabs**: open a second tab and switch it to another
+repo — both talk to the same server on `:8787`, and the URL tells you which tab
+is which.
 
 ## Running the spikes
 
