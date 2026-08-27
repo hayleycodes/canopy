@@ -9,6 +9,14 @@ const DEMO =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).has("demo");
 
+// Which repo this tab is for. One server serves any repo; each tab pins itself to
+// a workspace via its ?ws= URL param, so two tabs can hold two repos at once and
+// the URL says which is which. Null until the boot sequence resolves a default.
+export function getWorkspace() {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("ws");
+}
+
 export async function fetchConfig() {
   if (DEMO) return DEMO_CONFIG;
   const res = await fetch("/api/config");
@@ -16,15 +24,34 @@ export async function fetchConfig() {
   return res.json();
 }
 
-export async function fetchGraph() {
+// Validate a repo path and record it as recently-opened. Returns the canonical
+// path to pin the tab to, plus the refreshed recent list. Used by the switcher.
+export async function openWorkspace(path) {
+  const res = await fetch("/api/workspaces/open", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `open ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchGraph(workspace) {
   if (DEMO) return DEMO_GRAPH;
-  const res = await fetch("/api/graph");
+  const res = await fetch(`/api/graph?workspace=${encodeURIComponent(workspace)}`);
   if (!res.ok) throw new Error(`graph ${res.status}`);
   return res.json();
 }
 
-export async function resetGraph() {
-  await fetch("/api/reset", { method: "POST" });
+export async function resetGraph(workspace) {
+  await fetch("/api/reset", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ workspace }),
+  });
 }
 
 // Run a turn (seed if no parentId, fork otherwise) and stream it. The prompt is
@@ -33,7 +60,7 @@ export async function resetGraph() {
 // Callbacks: onToken(text) as tokens arrive, onNode(node) when the turn lands,
 // onError(msg). Returns a function that aborts the turn — safe to call before the
 // stream has even opened.
-export function runTurn({ prompt, parentId = null, mode = "default", images = [] }, { onToken, onNode, onError, onPermission, onStart }) {
+export function runTurn({ prompt, parentId = null, mode = "default", images = [], workspace }, { onToken, onNode, onError, onPermission, onStart }) {
   let es = null;
   let aborted = false;
 
@@ -43,7 +70,7 @@ export function runTurn({ prompt, parentId = null, mode = "default", images = []
       const res = await fetch("/api/turn", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt, parentId, mode, images }),
+        body: JSON.stringify({ prompt, parentId, mode, images, workspace }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -94,22 +121,22 @@ export async function answerPermission(requestId, behavior, updatedInput) {
 
 // Pin or unpin a conversation by its root id. A pinned tree stays on the canvas
 // even after MAX_TREES newer conversations would otherwise push it off.
-export async function setPin(rootId, pinned) {
+export async function setPin(rootId, pinned, workspace) {
   await fetch("/api/pin", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ rootId, pinned }),
+    body: JSON.stringify({ rootId, pinned, workspace }),
   });
 }
 
 // Archive or unarchive a conversation by its root id. An archived tree drops off
 // the canvas (its transcript is kept) and shows in the drawer, where unarchiving
 // brings it back.
-export async function setArchive(rootId, archived) {
+export async function setArchive(rootId, archived, workspace) {
   await fetch("/api/archive", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ rootId, archived }),
+    body: JSON.stringify({ rootId, archived, workspace }),
   });
 }
 

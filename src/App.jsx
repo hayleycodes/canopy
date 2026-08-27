@@ -10,7 +10,7 @@ import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.js
 import { layoutTree } from "./layout.js";
 import { parseErrorPaste } from "./errorPaste.js";
 import { findingItems, looksLikeReview } from "./findings.js";
-import { answerPermission, fetchConfig, fetchGraph, resetGraph, runTurn, setArchive, setPin, setTurnAuto } from "./api.js";
+import { answerPermission, fetchConfig, fetchGraph, getWorkspace, openWorkspace, resetGraph, runTurn, setArchive, setPin, setTurnAuto } from "./api.js";
 
 const nodeTypes = { canopy: NodeCard };
 
@@ -24,6 +24,47 @@ const EMPTY_IMAGES = [];
 // we read it back to re-hang the branch under its finding card. Anchored to the
 // end so it survives whatever the user typed before it.
 const FINDING_REPLY_RE = /\(Re: your review finding — (.+)\)\s*$/;
+
+// The repo switcher dropdown. A browser tab can't open a native folder dialog
+// (that path needs a Tauri/Electron wrapper), so opening a repo is: pick a
+// recently-opened one, or paste a path. Both route through onPick, which
+// validates server-side and reloads the tab into the chosen repo.
+function WorkspacePicker({ current, recent, onPick, onClose }) {
+  const [path, setPath] = useState("");
+  const others = (recent || []).filter((p) => p !== current);
+  return (
+    <div className="ws-picker" onClick={(e) => e.stopPropagation()}>
+      <form
+        className="ws-open"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onPick(path);
+        }}
+      >
+        <input
+          autoFocus
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          placeholder="Open a repo by path…"
+          onKeyDown={(e) => e.key === "Escape" && onClose()}
+        />
+        <button type="submit" disabled={!path.trim()}>Open</button>
+      </form>
+      {others.length > 0 && (
+        <ul className="ws-recent">
+          {others.map((p) => (
+            <li key={p}>
+              <button title={p} onClick={() => onPick(p)}>
+                📁 {p.split("/").pop()}
+                <span className="ws-path">{p}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export default function App() {
   const [nodes, setNodes] = useState([]); // server nodes
@@ -69,7 +110,11 @@ export default function App() {
     }
   });
   const [error, setError] = useState(null);
-  const [workspace, setWorkspace] = useState(null);
+  // The repo this tab is for, from its ?ws= URL. Null until the boot sequence
+  // resolves the server default for a tab that opened without one.
+  const [workspace, setWorkspace] = useState(() => getWorkspace());
+  const [recent, setRecent] = useState([]); // recently-opened repos, for the switcher
+  const [switching, setSwitching] = useState(false); // repo switcher panel open
   // React Flow measures each node's size with a ResizeObserver and keeps it in
   // its OWN store — but it drops those dimensions every time the `nodes` prop is
   // rebuilt (see createNodeInternals). Since we rebuild `rfNodes` on every token,
@@ -226,20 +271,21 @@ export default function App() {
   );
 
   const refresh = useCallback(async () => {
-    const g = await fetchGraph();
+    if (!workspace) return; // graph is per-repo; wait until this tab has one
+    const g = await fetchGraph(workspace);
     setNodes(g.nodes);
     setArchivedList(g.archived || []);
-  }, []);
+  }, [workspace]);
 
   // Pin/unpin a conversation from its summary header. A pinned tree survives the
   // recency limit, so it stays on the canvas however old it gets. Persisted
   // server-side, so we refresh to pick up which trees are now drawn.
   const togglePin = useCallback(
     async (rootId, pinned) => {
-      await setPin(rootId, pinned);
+      await setPin(rootId, pinned, workspace);
       await refresh();
     },
-    [refresh]
+    [refresh, workspace]
   );
 
   // Walk parent links to the root of whatever conversation a node belongs to.
@@ -264,17 +310,51 @@ export default function App() {
   // so the inspector doesn't dangle on a node that just left the canvas.
   const toggleArchive = useCallback(
     async (rootId, archived) => {
-      await setArchive(rootId, archived);
+      await setArchive(rootId, archived, workspace);
       if (archived && rootOf(selectedId) === rootId) setSelectedId(null);
       await refresh();
     },
-    [refresh, rootOf, selectedId]
+    [refresh, rootOf, selectedId, workspace]
   );
 
+  // Boot: learn the server default + recent repos, and — for a tab that opened
+  // with no ?ws= — pin it to the default and write that into the URL so the tab
+  // is self-describing (and a reload keeps the same repo).
   useEffect(() => {
-    refresh().catch((e) => setError(e.message));
-    fetchConfig().then((c) => setWorkspace(c.workspace)).catch(() => {});
-  }, [refresh]);
+    fetchConfig()
+      .then((c) => {
+        setRecent(c.recent || []);
+        if (!getWorkspace() && c.defaultWorkspace) {
+          const u = new URL(window.location.href);
+          u.searchParams.set("ws", c.defaultWorkspace);
+          window.history.replaceState({}, "", u);
+          setWorkspace(c.defaultWorkspace);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Load the graph once this tab knows its repo (and whenever that changes).
+  useEffect(() => {
+    if (workspace) refresh().catch((e) => setError(e.message));
+  }, [workspace, refresh]);
+
+  // Switch this tab to another repo. A repo change is a clean slate — the whole
+  // canvas, selection, and any in-flight turns belong to the old repo — so we
+  // navigate (full reload) rather than hand-tearing-down state. Two repos at once
+  // is just two tabs. Validates + records the repo before navigating.
+  const switchWorkspace = useCallback(async (path) => {
+    const trimmed = (path || "").trim();
+    if (!trimmed) return;
+    try {
+      const { workspace: ws } = await openWorkspace(trimmed);
+      const u = new URL(window.location.href);
+      u.searchParams.set("ws", ws);
+      window.location.assign(u); // reload into the new repo
+    } catch (e) {
+      setError(e.message);
+    }
+  }, []);
 
   // Name the browser tab after the workspace so multiple instances are
   // distinguishable at a glance.
@@ -658,7 +738,7 @@ export default function App() {
       setSelectedId(tempId);
 
       const abort = runTurn(
-        { prompt: text, parentId, mode: turnMode, images },
+        { prompt: text, parentId, mode: turnMode, images, workspace },
         {
           onStart: (turnId) => patchPending(tempId, (p) => ({ ...p, turnId })),
           onToken: (t) =>
@@ -722,7 +802,7 @@ export default function App() {
       );
       aborters.current.set(tempId, abort);
     },
-    [modes, newRootMode, rootOf, patchPending, refresh, pushToast]
+    [modes, newRootMode, rootOf, patchPending, refresh, pushToast, workspace]
   );
 
   // Bottom composer: seed a root (nothing selected) or continue the selected node.
@@ -777,7 +857,7 @@ export default function App() {
     // clearing state, so nothing keeps running server-side after a reset.
     for (const abort of aborters.current.values()) abort();
     aborters.current.clear();
-    await resetGraph();
+    await resetGraph(workspace);
     setSelectedId(null);
     setPendings([]);
     setModes({});
@@ -786,7 +866,7 @@ export default function App() {
     setReadyIds(new Set());
     setToasts([]);
     await refresh();
-  }, [refresh]);
+  }, [refresh, workspace]);
 
   // Start a fresh conversation: open the inspector on the right in its empty
   // "new conversation" state (deselect any node so its composer seeds a NEW root
@@ -810,8 +890,22 @@ export default function App() {
           {empty ? "Seed a root to grow the tree" : "Select a node, then fork from it"}
         </div>
         {workspace && (
-          <div className="workspace" title={`Every turn runs in ${workspace}`}>
-            📁 {workspace.split("/").pop()}
+          <div className="workspace-switch">
+            <button
+              className="workspace"
+              title={`This tab runs in ${workspace} — click to switch repo`}
+              onClick={() => setSwitching((s) => !s)}
+            >
+              📁 {workspace.split("/").pop()} ▾
+            </button>
+            {switching && (
+              <WorkspacePicker
+                current={workspace}
+                recent={recent}
+                onPick={switchWorkspace}
+                onClose={() => setSwitching(false)}
+              />
+            )}
           </div>
         )}
         <button onClick={newConversation}>＋ new conversation</button>

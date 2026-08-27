@@ -132,4 +132,7 @@ const graph = [
 ];
 
 export const DEMO_GRAPH = { nodes: graph, edges: [] };
-export const DEMO_CONFIG = { workspace: "/Users/you/projects/acme-checkout" };
+export const DEMO_CONFIG = {
+  defaultWorkspace: "/Users/you/projects/acme-checkout",
+  recent: ["/Users/you/projects/acme-checkout", "/Users/you/projects/acme-web"],
+};

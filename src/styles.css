@@ -55,6 +55,9 @@ body {
   font-size: 13px;
   flex: 1;
 }
+.workspace-switch {
+  position: relative;
+}
 .workspace {
   font-family: ui-monospace, "SF Mono", monospace;
   font-size: 12px;
@@ -64,6 +67,71 @@ body {
   border-radius: 6px;
   padding: 3px 8px;
   max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.workspace:hover {
+  border-color: var(--accent);
+}
+
+/* repo switcher dropdown */
+.ws-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  width: 320px;
+  background: var(--card-solid);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #0002;
+  padding: 8px;
+}
+.ws-open {
+  display: flex;
+  gap: 6px;
+}
+.ws-open input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.ws-recent {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 6px 0 0;
+  border-top: 1px solid var(--border);
+}
+.ws-recent button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 13px;
+}
+.ws-recent button:hover {
+  background: var(--bg);
+}
+.ws-path {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 10px;
+  color: var(--muted);
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
