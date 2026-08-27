@@ -17,9 +17,13 @@ const FILE = join(homedir(), ".canopy", "recent.json");
 const MAX_RECENT = 20;
 
 // Absolute, symlink-free-ish canonical form so the same repo reached two ways
-// (trailing slash, relative launch) collapses to one entry.
+// (trailing slash, relative launch) collapses to one entry. A leading ~ is
+// expanded to the home dir — the shell would do this, but a path typed into the
+// switcher never touches a shell, so Node's resolver would treat ~ as a literal.
 export function normalizeWorkspace(path) {
-  return resolve(path);
+  let p = path;
+  if (p === "~" || p.startsWith("~/")) p = join(homedir(), p.slice(1));
+  return resolve(p);
 }
 
 // Is this an openable workspace — an existing directory?
