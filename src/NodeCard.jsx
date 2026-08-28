@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Handle, Position } from "reactflow";
 import PermPrompt from "./PermPrompt.jsx";
 
@@ -14,6 +15,20 @@ function fmtTokens(n) {
 // this node — do it on a node that already has children to split the tree.
 export default function NodeCard({ data, selected }) {
   const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted, ready, errorPaste, tokens, finding, canSplit, split, onSplit, rootId, pinned, pending, onTogglePin, onToggleArchive } = data;
+
+  // The file chip on a finding card copies its path on click (see below). A brief
+  // "copied" flip gives feedback without stealing the click from the card.
+  const [copied, setCopied] = useState(false);
+  const copyFile = (e, path) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(path).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      },
+      () => {},
+    );
+  };
 
   // A tree's summary header — what the whole conversation is about. The 📌 toggle
   // pins the tree so it stays on the canvas even once newer conversations would
@@ -64,6 +79,28 @@ export default function NodeCard({ data, selected }) {
           <span className="findingNum">{finding.n}</span>
           <span className="findingTitle">{finding.headline || "finding"}</span>
         </div>
+        {finding.file && (
+          <span className="findingFileRow">
+            <span className="findingFile" title={finding.file}>
+              <bdi>{finding.file}</bdi>
+            </span>
+            <button
+              type="button"
+              className={`findingFileCopy${copied ? " copied" : ""}`}
+              title={copied ? "Copied!" : "Copy path"}
+              onClick={(e) => copyFile(e, finding.file)}
+            >
+              {copied ? (
+                "✓"
+              ) : (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              )}
+            </button>
+          </span>
+        )}
         {finding.body && <div className="findingBody">{finding.body}</div>}
         <Handle type="source" position={Position.Bottom} />
       </div>

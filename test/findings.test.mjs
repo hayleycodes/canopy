@@ -216,6 +216,34 @@ No. Sam's nomination won't auto-link to Sally's employer record.`;
   assert.equal(findingItems(trace).length, 4);
 });
 
+test("a finding opening with a file ref splits the path off the headline", () => {
+  // When the finding leads with its code location ("**`file.ts:116`** — desc"),
+  // the long unbreakable path used to land in the headline and overflow the card.
+  // Peel it into `file` so the card headlines the description and renders the path
+  // as its own truncatable chip.
+  const review = `I found 2 issues:
+
+1. **\`saveAndContinueFromAllocation.ts:116\`** — recurring cast validation gap, \`guide\` is nullable.
+
+2. \`src/api/handler.ts:88\` — headers are never set on the retry path.`;
+  const items = findingItems(review);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].file, "saveAndContinueFromAllocation.ts:116");
+  assert.equal(items[0].headline, "recurring cast validation gap, guide is nullable.");
+  assert.equal(items[1].file, "src/api/handler.ts:88");
+  assert.equal(items[1].headline, "headers are never set on the retry path.");
+  // The full text still lives in the body for the inspector.
+  assert.match(items[0].body, /saveAndContinueFromAllocation\.ts:116/);
+});
+
+test("a finding that doesn't open with a file ref has a null file", () => {
+  // "app.js is broken" must not be mistaken for a file chip: a bare filename with
+  // no backticks and no :line is prose, not a citation.
+  const items = findingItems(REVIEW);
+  assert.equal(items[0].file, null);
+  assert.equal(items[0].headline, "Race condition in the cache");
+});
+
 test("prose with no list yields nothing", () => {
   assert.equal(findingItems("Looks good to me, ship it.").length, 0);
   assert.equal(parseFindings("Looks good to me, ship it."), null);

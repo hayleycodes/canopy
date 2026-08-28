@@ -45,6 +45,21 @@ function headlineFor(firstLine) {
   return h;
 }
 
+// A finding often opens with the code location it's about: "**`file.ts:42`** —
+// short description". Peel that leading file ref off so the card can headline
+// the description and render the path as its own truncatable chip, instead of a
+// long unbreakable filename spilling out of the node. Returns { file, rest };
+// file is null when the line doesn't open with one. To avoid grabbing an
+// ordinary word that happens to end in ".js", the ref must be backtick-wrapped
+// or carry a `:line` — the texture of a real citation, not prose.
+const FILE_REF_LEAD =
+  /^\s*\*{0,2}\s*(?:`\s*([\w./-]+\.[a-z]{1,5}(?::\d+(?:-\d+)?)?)\s*`|([\w./-]+\.[a-z]{1,5}:\d+(?:-\d+)?))\s*\*{0,2}\s*(?:[—–:-]+\s*)?/i;
+function splitFileRef(text) {
+  const m = text.match(FILE_REF_LEAD);
+  if (!m) return { file: null, rest: text };
+  return { file: m[1] || m[2], rest: text.slice(m[0].length) };
+}
+
 // The lead-in of a review's closing wrap-up — the paragraph after the last
 // finding where the reviewer steps back ("My take: …", "Overall …", "Bottom
 // line: …"). Distinctly a summary word, not a within-finding subsection like
@@ -89,8 +104,14 @@ function collectItems(lines, startRe) {
     let block = lines.slice(from, to);
     if (isLast) block = trimClosingSummary(block);
     const firstLine = block[0].replace(startRe, "");
+    const { file, rest } = splitFileRef(firstLine);
     const body = [firstLine, ...block.slice(1)].join("\n").replace(/\s+$/, "");
-    items.push({ n: items.length + 1, headline: headlineFor(firstLine), body });
+    items.push({
+      n: items.length + 1,
+      file,
+      headline: headlineFor(rest || firstLine),
+      body,
+    });
   }
   return items;
 }

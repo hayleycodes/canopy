@@ -252,6 +252,55 @@ body {
   line-height: 1.3;
   color: var(--text);
 }
+/* the code location the finding cites, pulled out of the headline (see
+   splitFileRef). direction:rtl clips from the LEFT so the meaningful tail —
+   extension and :line — stays visible; <bdi> keeps the text itself in reading
+   order. full path is on the title tooltip. */
+.findingFileRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 6px 26px;
+}
+.findingFile {
+  flex: 1;
+  min-width: 0; /* let the path truncate inside the flex row */
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--muted);
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* the copy button stays hidden until you hover the path, so it doesn't add
+   visual noise to every finding card */
+.findingFileCopy {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 1px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease, color 0.1s ease;
+}
+.findingFileRow:hover .findingFileCopy,
+.findingFileCopy:focus-visible {
+  opacity: 1;
+}
+.findingFileCopy:hover {
+  color: var(--text);
+}
+.findingFileCopy.copied {
+  opacity: 1;
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+}
 .findingBody {
   color: var(--muted);
   max-height: 84px;
