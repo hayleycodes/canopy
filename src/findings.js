@@ -185,3 +185,30 @@ export function parseFindings(text) {
   const items = findingItems(text);
   return looksLikeReview(text, items) ? items : null;
 }
+
+// The opposite of a review: a reply that *proposes* breaking work into parallel
+// pieces — "I'll have subagents dig into (1)… (2)… (3)…", "let me parallelize
+// this into three tracks". A review looks back ("I found 3 issues"); a fan-out
+// looks forward, and each of its items is a job you'd hand to its own branch. We
+// key on the decomposition intent, deliberately narrow to parallel-work language
+// (not a plain "investigate") so an ordinary numbered plan doesn't match.
+const FANOUT_FRAMING =
+  /\b(?:sub-?agents?|in parallel|parallel(?:i[sz]e|i[sz]ing|i[sz]ed)?|fan(?:ning)?[ -]?out|spin(?:ning)?[ -]?up|separate (?:branches|tracks|threads|investigations|agents|workstreams)|independent (?:branches|investigations|tracks|workstreams)|(?:three|four|several|multiple|two|\d+) (?:parallel|separate|independent|concurrent) (?:tracks|branches|threads|investigations|pieces|workstreams))\b/i;
+
+// Does this reply read as a proposal to fan work out into parallel branches? Same
+// shape as looksLikeReview — needs ≥2 enumerable items plus the framing — but keyed
+// on forward-looking parallel-work language rather than findings framing. Searches
+// the whole reply, since the "I'll run these in parallel" line can sit before or
+// after the list; the framing is strict enough that reviews don't trip it.
+export function looksLikeFanout(text, items = findingItems(text)) {
+  if (items.length < 2) return false;
+  return FANOUT_FRAMING.test(text || "");
+}
+
+// The items only when the reply proposes a parallel fan-out; [] otherwise. Feeds
+// the node's manual "spin up N branches" button — each item becomes a real forked
+// turn off the proposing node.
+export function fanoutItems(text) {
+  const items = findingItems(text);
+  return looksLikeFanout(text, items) ? items : [];
+}

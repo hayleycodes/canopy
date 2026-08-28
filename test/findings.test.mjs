@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findingItems, looksLikeReview, parseFindings } from "../src/findings.js";
+import { findingItems, looksLikeReview, parseFindings, looksLikeFanout, fanoutItems } from "../src/findings.js";
 
 test("explicit `### Finding N:` headings split deterministically, even one", () => {
   const review = `## Summary
@@ -247,4 +247,65 @@ test("a finding that doesn't open with a file ref has a null file", () => {
 test("prose with no list yields nothing", () => {
   assert.equal(findingItems("Looks good to me, ship it.").length, 0);
   assert.equal(parseFindings("Looks good to me, ship it."), null);
+});
+
+// ── Fan-out proposals: the "spin up N branches" trigger ──
+
+// The real shape from the screenshot: a plan to hand three pieces to parallel
+// subagents, each written up as a numbered heading with its own file refs.
+const FANOUT = `This is three distinct pieces of work. Let me parallelize the investigation — I'll have subagents dig into (1) the Realtime setup, (2) the CSS/layout, and (3) the resize bug.
+
+## 1. Live updates — Supabase Realtime
+
+\`sighting-candidates.service.ts:42\` — add \`subscribeToPendingCandidates()\`.
+
+## 2. Gliding carousel
+
+Replace the single remounted card with a track: all cards in a flex row.
+
+## 3. The residual resize-on-select
+
+The old \`min-height: 40px\` reserve could still drift on narrow widths.`;
+
+test("a fan-out proposal detects and yields one item per track", () => {
+  const items = fanoutItems(FANOUT);
+  assert.equal(items.length, 3);
+  assert.equal(items[0].headline, "Live updates"); // headlineFor trims at the em-dash
+  assert.equal(items[1].headline, "Gliding carousel");
+  assert.equal(items[2].headline, "The residual resize-on-select");
+  assert.ok(looksLikeFanout(FANOUT));
+  // The body carries the track's detail, so the forked branch inherits the plan.
+  assert.match(items[0].body, /subscribeToPendingCandidates/);
+});
+
+test("a fan-out proposal is not treated as a review", () => {
+  // It cites file:lines and has ≥2 heading items, so the citation heuristic could
+  // fire — but the app gives fan-out precedence, and here we just confirm both
+  // detectors can see it so the App layer can prefer fan-out.
+  assert.ok(looksLikeFanout(FANOUT));
+});
+
+test("a past-tense review is not a fan-out", () => {
+  // The demo review shape ("I found 3 issues") must stay passive finding cards,
+  // not sprout a spin-up button.
+  assert.equal(looksLikeFanout(REVIEW), false);
+  assert.equal(fanoutItems(REVIEW).length, 0);
+});
+
+test("an ordinary numbered plan without parallel framing is not a fan-out", () => {
+  const plan = `Here's the plan:
+
+1. Add the migration
+2. Wire up the service
+3. Update the UI`;
+  assert.equal(looksLikeFanout(plan), false);
+  assert.equal(fanoutItems(plan).length, 0);
+});
+
+test("a single-item proposal is not a fan-out", () => {
+  const one = `Let me parallelize this.
+
+1. Just the one thing.`;
+  assert.equal(looksLikeFanout(one), false);
+  assert.equal(fanoutItems(one).length, 0);
 });

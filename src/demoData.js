@@ -129,6 +129,35 @@ const graph = [
       },
     ],
   }),
+
+  // ── Tree 4: a fan-out proposal — offers "⑂ spin up 3" to launch parallel branches ──
+  ...tree({
+    root: "d4d11111",
+    title: "Make the review page update live",
+    order: 3,
+    nodes: [
+      {
+        id: "d4d11111",
+        prompt: "go with option A. Also make the carousel glide, and the box still resizes after selecting a pig",
+        label: "go with option A. Also make the carousel glide…",
+        result:
+          "This is three distinct pieces of work. Let me parallelize the " +
+          "investigation — I'll have subagents dig into (1) the Realtime setup, " +
+          "(2) the glide animation, and (3) the resize bug.\n\n" +
+          "## 1. Live updates — Supabase Realtime\n\n" +
+          "`sighting-candidates.service.ts:42` — add a `subscribeToPendingCandidates()` " +
+          "channel and reconcile incoming rows against local state.\n\n" +
+          "## 2. Gliding carousel\n\n" +
+          "Replace the single remounted card (`key={c.id}` forces a jarring swap) with " +
+          "a track: all cards in a flex row inside a clipped viewport, translated on index.\n\n" +
+          "## 3. The residual resize-on-select\n\n" +
+          "`.reviewSave` reserves `min-height: 40px`, but the label baseline still nudges " +
+          "the row a pixel on select. Always render the save row's contents and toggle " +
+          "visibility instead of mounting/unmounting.",
+        tokens: { context: 74000, output: 35000 },
+      },
+    ],
+  }),
 ];
 
 export const DEMO_GRAPH = { nodes: graph, edges: [] };
