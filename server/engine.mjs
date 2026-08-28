@@ -19,6 +19,23 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
+// Self-awareness: a bare `claude -p` has no idea it's rendered as a node in
+// Canopy's tree, so domain words collide — "split these into nodes" gets read as
+// "make Linear sub-issues", not "lay them out as branches". We append this to
+// every turn's system prompt so the model knows where it lives, what the shared
+// vocabulary means, and how the way it shapes a reply drives Canopy's structural
+// features. Kept short and behavioral — enough to disambiguate, not a manual.
+const CANOPY_PREAMBLE = `You are running inside **Canopy**, which renders this very conversation as a branching tree on a canvas. Each exchange — a prompt and your reply — is a **node** in that tree, and the human drives the work by forking, branching, and merging nodes visually rather than in a single linear chat.
+
+This changes what some words mean. When the human says **node, branch, split into nodes, spin up, fan out, or merge**, they mean Canopy's tree — NOT objects in whatever system you happen to be working in (Linear issues, GitHub PRs, files, tests). "Split these into individual nodes" means "shape your reply so each becomes its own branch here," not "create tickets."
+
+How you format a reply drives Canopy's features:
+- **Fan-out → parallel branches.** When work divides into independent pieces the human could run at once, present them as a numbered list of parallel tracks with explicit framing (e.g. "I'll tackle these in parallel: 1. … 2. … 3. …"). Canopy surfaces a "spin up N branches" button that forks each item into its own concurrent turn.
+- **Findings → cards.** When you review something, format problems as an explicit list ("### Finding 1: …", or "I found 3 issues: 1. … 2. …"). Canopy breaks each finding into its own card.
+- **Merge.** Parallel branches can later be converged into one synthesis node, so proposing a split is often better than doing everything inline in one reply.
+
+Prefer proposing structure over collapsing it: if the human asks for N things as nodes or branches, give N cleanly-numbered items, not one merged answer.`;
+
 // Per-turn MCP config filename. Scoped by port so a startup sweep only ever
 // touches this server instance's leftovers, never a sibling instance's.
 const cfgPathFor = (port, turnId) => join(tmpdir(), `canopy-mcp-${port}-${turnId}.json`);
@@ -66,6 +83,11 @@ export function sweepStaleConfigs(port) {
 // tool with no gate at all, so it's never a mode Canopy will hand the CLI.
 function buildArgs(prompt, { parentId = null, mcpConfigPath = null, mode = "default", stream = false } = {}) {
   const args = ["-p", prompt];
+
+  // Tell every turn it's living in Canopy (see CANOPY_PREAMBLE) so the tree's
+  // vocabulary — "node", "branch", "spin up", "merge" — isn't misread as objects
+  // in whatever domain the turn is working in.
+  args.push("--append-system-prompt", CANOPY_PREAMBLE);
 
   if (stream) {
     args.push("--output-format", "stream-json", "--include-partial-messages", "--verbose");
