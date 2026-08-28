@@ -804,11 +804,17 @@ export default function App() {
             // (see allNodes), so nothing to record here.
             // A new root carries the mode chosen for it into the modes map.
             if (!parentId) setModes((m) => ({ ...m, [node.id]: newRootMode }));
-            // Bring in the real node BEFORE dropping the pending, so the selected
-            // id never briefly points at a node that no longer exists. That gap
-            // makes `selected` null for a frame, which unmounts the inspector and
-            // throws the chat scroll back to the top.
-            await refresh();
+            // Fetch the real graph WITHOUT committing yet, then swap the pending
+            // for it in a single synchronous batch below. If we committed the
+            // real node first (via refresh) and dropped the pending afterwards,
+            // the two land in separate renders — and the frame between them holds
+            // both the real tree and the still-present pending, drawing the tree
+            // twice. A failed fetch must still drop the pending, or it lingers as
+            // a second tree beside whatever the next refresh brings in.
+            let g = null;
+            try {
+              g = await fetchGraph(workspace);
+            } catch {}
             // Decide whether to follow this finished turn into the inspector. We
             // follow our own branch (the temp id we're still viewing) and an idle
             // inspector sitting on null or the fork parent — but NEVER yank
@@ -819,9 +825,15 @@ export default function App() {
             const followed =
               cur === tempId ||
               (!composingRef.current && (cur === null || cur === parentId));
-            // Hand selection from the temp id to the real node, then drop the
-            // pending — batched into one render so selection is always valid. The
-            // temp id is going away regardless, so always advance off it.
+            // Bring in the real node, hand selection from the temp id to it, and
+            // drop the pending — all synchronous, so React batches them into one
+            // render. The real tree replaces the pending in place; there's never
+            // a frame with both, and the selected id is always valid. The temp id
+            // is going away regardless, so always advance off it.
+            if (g) {
+              setNodes(g.nodes);
+              setArchivedList(g.archived || []);
+            }
             setSelectedId((c) => {
               if (c === tempId) return node.id;
               return followed ? node.id : c;
@@ -843,7 +855,7 @@ export default function App() {
       );
       aborters.current.set(tempId, abort);
     },
-    [modes, newRootMode, rootOf, patchPending, refresh, pushToast, workspace]
+    [modes, newRootMode, rootOf, patchPending, pushToast, workspace]
   );
 
   // Bottom composer: seed a root (nothing selected) or continue the selected node.
