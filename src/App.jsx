@@ -510,22 +510,34 @@ export default function App() {
   const allNodes = useMemo(() => {
     // Re-hang finding replies under their finding card. Such a branch's real
     // (server) parent is the review node, but its prompt carries the finding it
-    // forked off (FINDING_REPLY_RE); match that headline to the review's finding
-    // cards and re-parent onto the right one, so the reply reads as that
-    // finding's conversation instead of a sibling of the findings. Derived from
-    // persisted data, so it holds across reloads with no separate bookkeeping.
-    const cardByHeadline = new Map(); // reviewId -> (headline -> finding card id)
+    // forked off (FINDING_REPLY_RE); match that tag to the review's finding cards
+    // and re-parent onto the right one, so the reply reads as that finding's
+    // conversation instead of a sibling of the findings. Derived from persisted
+    // data, so it holds across reloads with no separate bookkeeping.
+    //
+    // The tag stored whatever the finding's headline was AT REPLY TIME, and that
+    // computation has since changed — a leading `file.ts:42` ref is now peeled
+    // off into its own chip, so today's headline is the description while an older
+    // reply's tag is the bare file ref. Key each card on BOTH its headline and its
+    // file ref so either form resolves; without this those older replies match
+    // nothing and scatter back onto the top-level review node. Set the file ref
+    // first so a genuine headline always wins a collision.
+    const cardByKey = new Map(); // reviewId -> (headline|fileRef -> finding card id)
     for (const [reviewId, info] of findingInfo) {
       if (!info.shown) continue;
       const m = new Map();
-      info.items.forEach((it, i) => m.set(it.headline, `finding-${reviewId}-${i}`));
-      cardByHeadline.set(reviewId, m);
+      info.items.forEach((it, i) => {
+        const cardId = `finding-${reviewId}-${i}`;
+        if (it.file) m.set(it.file, cardId);
+        m.set(it.headline, cardId);
+      });
+      cardByKey.set(reviewId, m);
     }
     const list = nodes.map((n) => {
-      const m = n.parentId && cardByHeadline.get(n.parentId);
+      const m = n.parentId && cardByKey.get(n.parentId);
       if (!m) return n;
-      const headline = n.prompt?.match(FINDING_REPLY_RE)?.[1]?.trim();
-      const cardId = headline && m.get(headline);
+      const tag = n.prompt?.match(FINDING_REPLY_RE)?.[1]?.trim();
+      const cardId = tag && m.get(tag);
       return cardId ? { ...n, parentId: cardId } : n;
     });
     for (const p of pendings) {
