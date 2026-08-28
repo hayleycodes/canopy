@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -59,20 +59,27 @@ function codeText(node) {
   return "";
 }
 
+// External link renderer — hoisted (not an inline arrow) so `components` can be a
+// stable module constant. A fresh `components` object each render would defeat
+// react-markdown's memoization and re-parse on every token.
+const ExternalLink = (props) => <a {...props} target="_blank" rel="noreferrer" />;
+const REMARK_PLUGINS = [remarkGfm];
+const COMPONENTS = { a: ExternalLink, pre: CodeBlock };
+
 // Render assistant replies as markdown (bold, lists, code, links, tables). Links
 // open in a new tab; everything else is styled via `.md` in styles.css.
-export default function Markdown({ children }) {
+//
+// Memoized on `children`: the inspector re-renders on every streamed token, but
+// only the one growing segment's text actually changes — every other exchange in
+// the thread has identical text, so it skips the (expensive) remark re-parse.
+function Markdown({ children }) {
   return (
     <div className="md">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: (props) => <a {...props} target="_blank" rel="noreferrer" />,
-          pre: CodeBlock,
-        }}
-      >
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
         {children || ""}
       </ReactMarkdown>
     </div>
   );
 }
+
+export default memo(Markdown);

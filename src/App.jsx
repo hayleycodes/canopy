@@ -193,6 +193,45 @@ export default function App() {
     setPendings((ps) => ps.map((p) => (p.tempId === tempId ? fn(p) : p)));
   }, []);
 
+  // Tokens can arrive faster than the screen refreshes; committing each to state
+  // on its own re-renders the whole app per token, which compounds badly in a long
+  // conversation. Buffer incoming text per turn and flush at most once per frame,
+  // coalescing a burst into a single render. (During streaming a turn only ever
+  // grows one trailing text segment — no Q&A is inserted client-side — so merging
+  // a run of tokens is identical to applying them one by one.)
+  const tokenBuf = useRef(new Map()); // tempId -> unflushed text
+  const flushRaf = useRef(0);
+  const flushTokens = useCallback(() => {
+    flushRaf.current = 0;
+    const buf = tokenBuf.current;
+    if (buf.size === 0) return;
+    const batch = new Map(buf);
+    buf.clear();
+    setPendings((ps) =>
+      ps.map((p) => {
+        const t = batch.get(p.tempId);
+        if (!t) return p;
+        const segments = [...(p.segments || [])];
+        const last = segments[segments.length - 1];
+        if (last && last.type === "text") {
+          segments[segments.length - 1] = { type: "text", text: last.text + t };
+        } else {
+          const trimmed = t.replace(/^\n+/, "");
+          if (trimmed) segments.push({ type: "text", text: trimmed });
+        }
+        return { ...p, result: p.result + t, segments };
+      })
+    );
+  }, []);
+  const pushToken = useCallback(
+    (tempId, t) => {
+      const buf = tokenBuf.current;
+      buf.set(tempId, (buf.get(tempId) || "") + t);
+      if (!flushRaf.current) flushRaf.current = requestAnimationFrame(flushTokens);
+    },
+    [flushTokens]
+  );
+
   // Paste a screenshot straight into a composer (Cmd/Ctrl+V). Returns a paste
   // handler bound to a draft's add-images fn; a paste that carries no image
   // falls through untouched so text paste still works.
@@ -982,24 +1021,13 @@ export default function App() {
         { prompt: text, parentId, mode: turnMode, images, workspace },
         {
           onStart: (turnId) => patchPending(tempId, (p) => ({ ...p, turnId })),
-          onToken: (t) =>
-            patchPending(tempId, (p) => {
-              // Mirror the server: append to the current text segment, or start a
-              // fresh one after a Q&A (dropping its leading block-separator gap).
-              const segments = [...(p.segments || [])];
-              const last = segments[segments.length - 1];
-              if (last && last.type === "text") {
-                segments[segments.length - 1] = { type: "text", text: last.text + t };
-              } else {
-                const trimmed = t.replace(/^\n+/, "");
-                if (trimmed) segments.push({ type: "text", text: trimmed });
-              }
-              return { ...p, result: p.result + t, segments };
-            }),
+          // Buffered and flushed once per frame (see pushToken/flushTokens).
+          onToken: (t) => pushToken(tempId, t),
           onPermission: (req) =>
             patchPending(tempId, (p) => ({ ...p, perms: [...p.perms, req] })),
           onNode: async (node) => {
             aborters.current.delete(tempId);
+            tokenBuf.current.delete(tempId); // real node carries the full text
             // A finding reply re-hangs under its finding card via its prompt tag
             // (see allNodes), so nothing to record here.
             // A new root carries the mode chosen for it into the modes map.
@@ -1048,6 +1076,7 @@ export default function App() {
           },
           onError: (msg) => {
             aborters.current.delete(tempId);
+            tokenBuf.current.delete(tempId);
             setError(msg);
             setPendings((ps) => ps.filter((p) => p.tempId !== tempId));
           },
@@ -1055,7 +1084,7 @@ export default function App() {
       );
       aborters.current.set(tempId, abort);
     },
-    [modes, newRootMode, rootOf, patchPending, pushToast, workspace]
+    [modes, newRootMode, rootOf, patchPending, pushToken, pushToast, workspace]
   );
 
   // Spin a fan-out proposal into parallel branches: fork one real turn off the
