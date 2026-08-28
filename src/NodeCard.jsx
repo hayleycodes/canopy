@@ -14,7 +14,7 @@ function fmtTokens(n) {
 // requests surface here as Allow/Deny. The ⑂ button branches a new child off
 // this node — do it on a node that already has children to split the tree.
 export default function NodeCard({ data, selected }) {
-  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted, ready, errorPaste, tokens, finding, canSplit, split, onSplit, rootId, pinned, pending, onTogglePin, onToggleArchive } = data;
+  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted, ready, errorPaste, tokens, finding, canSplit, split, onSplit, canSpinUp, spinCount, onSpinUp, canMerge, mergeCount, onMerge, isMerge, rootId, pinned, pending, onTogglePin, onToggleArchive } = data;
 
   // The file chip on a finding card copies its path on click (see below). A brief
   // "copied" flip gives feedback without stealing the click from the card.
@@ -108,9 +108,14 @@ export default function NodeCard({ data, selected }) {
   }
 
   return (
-    <div className={`nodeCard${selected ? " selected" : ""}${highlighted ? " inView" : ""}${streaming ? " streaming" : ""}${errorPaste ? " errored" : ""}${ready ? " ready" : ""}`}>
+    <div className={`nodeCard${selected ? " selected" : ""}${highlighted ? " inView" : ""}${streaming ? " streaming" : ""}${errorPaste ? " errored" : ""}${ready ? " ready" : ""}${isMerge ? " merged" : ""}`}>
       <Handle type="target" position={Position.Top} />
       {ready && <span className="readyDot" title="New reply ready — click to open" />}
+      {isMerge && (
+        <span className="mergeBadge" title="Merged — this node combines a fan of parallel branches">
+          ⤚ merged
+        </span>
+      )}
 
       <div className="nodeHead">
         {errorPaste ? (
@@ -129,31 +134,60 @@ export default function NodeCard({ data, selected }) {
         ) : (
           <div className="nodeLabel">{label || "…"}</div>
         )}
-        {canSplit && (
-          <button
-            className="splitBtn nodrag"
-            title={split ? "Merge findings back into this reply" : "Split this review's findings into cards"}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSplit(id);
-            }}
-          >
-            {split ? "⤺ merge" : "⑃ split"}
-          </button>
-        )}
-        {canFork && (
-          <button
-            className="forkBtn nodrag"
-            title="Fork a new branch from here"
-            onClick={(e) => {
-              e.stopPropagation();
-              onFork(id);
-            }}
-          >
-            <span className="forkIco">⑂</span>
-          </button>
-        )}
       </div>
+
+      {(canSplit || canSpinUp || canMerge || canFork) && (
+        <div className="nodeTools nodrag">
+          {canSpinUp && (
+            <button
+              className="spinBtn"
+              title={`Run these ${spinCount} as parallel branches — each forks from here carrying the full thread as context`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSpinUp(id);
+              }}
+            >
+              ⑂ spin up {spinCount}
+            </button>
+          )}
+          {canMerge && (
+            <button
+              className="mergeBtn"
+              title={`Bring these ${mergeCount} branches back together — a new turn that combines what each produced`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMerge(id);
+              }}
+            >
+              ⤚ merge {mergeCount}
+            </button>
+          )}
+          {canSplit && (
+            <button
+              className="splitBtn"
+              title={split ? "Merge findings back into this reply" : "Split this review's findings into cards"}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSplit(id);
+              }}
+            >
+              {split ? "⤺ merge" : "⑃ split"}
+            </button>
+          )}
+          {canFork && (
+            <button
+              className="forkBtn"
+              title="Fork a new branch from here"
+              onClick={(e) => {
+                e.stopPropagation();
+                onFork(id);
+              }}
+            >
+              <span className="forkIco">⑂</span>
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="nodeResult">
         {result || (streaming ? "" : <span className="muted">no reply yet</span>)}

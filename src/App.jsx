@@ -9,7 +9,7 @@ import Markdown from "./Markdown.jsx";
 import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.jsx";
 import { layoutTree } from "./layout.js";
 import { parseErrorPaste } from "./errorPaste.js";
-import { findingItems, looksLikeReview } from "./findings.js";
+import { findingItems, looksLikeReview, fanoutItems } from "./findings.js";
 import { answerPermission, fetchConfig, fetchGraph, getWorkspace, openWorkspace, resetGraph, runTurn, setArchive, setPin, setTurnAuto } from "./api.js";
 
 const nodeTypes = { canopy: NodeCard };
@@ -24,6 +24,21 @@ const EMPTY_IMAGES = [];
 // we read it back to re-hang the branch under its finding card. Anchored to the
 // end so it survives whatever the user typed before it.
 const FINDING_REPLY_RE = /\(Re: your review finding — (.+)\)\s*$/;
+
+// A converge turn Canopy seeds to bring fanned-out branches back together carries
+// this tag on its prompt. Like the finding tag it's the durable record — the
+// server only knows this branch forked one sibling, not that it's a merge — so we
+// read it back to (a) draw the gather edges from the other branches into it and
+// (b) hide the parent's "merge" button once one exists. Holds across reloads with
+// no separate bookkeeping. Anchored to the end so it survives the digest before it.
+const MERGE_TAG_RE = /\(Canopy: merge\)\s*$/;
+// A merge node's real prompt is a giant digest of every branch's output (fed to
+// the model so it can combine them). We never want to *show* that wall of text —
+// on the card and in the thread it reads as a short "Merging N branches…" line.
+function mergePromptLabel(prompt) {
+  const n = (prompt.match(/^—\s*Branch \d+ \(/gm) || []).length;
+  return n > 0 ? `Merging ${n} branches…` : "Merging branches…";
+}
 
 // The repo switcher dropdown. A browser tab can't open a native folder dialog
 // (that path needs a Tauri/Electron wrapper), so opening a repo is: pick a
@@ -126,6 +141,12 @@ export default function App() {
   // map → follow auto-detection (looksLikeReview); mapped to true/false → the user
   // forced it split or merged via the node's split button. Keyed by node id.
   const [splitOverride, setSplitOverride] = useState(() => new Map());
+  // Review nodes whose fan-out proposal has already been spun up into branches, so
+  // the "spin up N" button drops off and can't spawn duplicate branches. Session
+  // state (like splitOverride) — the branches themselves persist server-side, so a
+  // reload naturally leaves them in place with the button gone (its items are now
+  // real children).
+  const [spunUp, setSpunUp] = useState(() => new Set());
   const inputRef = useRef(null);
   const replyRef = useRef(null); // inspector's composer, focused for a new conversation
   const inspectorRef = useRef(null);
@@ -265,6 +286,32 @@ export default function App() {
     inputRef.current?.focus();
   }, [clearDraft]);
 
+  // The node's "spin up" button lives in the rfNodes memo, which renders before
+  // spinUp is declared (it needs startTurn, defined further down). Reach it through
+  // a ref so the memo depends on this stable wrapper, not the not-yet-initialized
+  // spinUp itself. spinUpRef is pointed at the latest spinUp by an effect below.
+  const spinUpRef = useRef(null);
+  const handleSpinUp = useCallback((id) => spinUpRef.current?.(id), []);
+  // Same ref indirection for merge (mergeBranches is defined below startTurn, past
+  // the rfNodes memo that wires this button).
+  const mergeRef = useRef(null);
+  const handleMerge = useCallback((id) => mergeRef.current?.(id), []);
+
+  // Replies that *propose* fanning work out into parallel branches ("I'll have
+  // subagents dig into (1)… (2)… (3)…"). For each such node, the parsed items — one
+  // per proposed track. The node offers a "spin up N branches" button that forks
+  // each item into a real concurrent turn (see spinUp). Same final-block source as
+  // findings; streaming turns are excluded (a half-streamed plan would flicker).
+  const fanoutInfo = useMemo(() => {
+    const m = new Map();
+    for (const n of nodes) {
+      if (n.kind === "summary" || n.streaming) continue;
+      const items = fanoutItems(n.finalResult ?? n.result);
+      if (items.length >= 2) m.set(n.id, { items });
+    }
+    return m;
+  }, [nodes]);
+
   // Review replies broken out into findings: for each real node whose reply is a
   // findings list, the parsed items and whether it's currently shown as cards
   // (auto-detected, unless the user's split button overrode it). Pending/streaming
@@ -273,6 +320,10 @@ export default function App() {
     const m = new Map();
     for (const n of nodes) {
       if (n.kind === "summary") continue;
+      // A fan-out proposal wins the node — it gets the spin-up button, not passive
+      // finding cards. Both detectors can see the same numbered+cited reply, so
+      // without this a proposal would also sprout inert cards.
+      if (fanoutInfo.has(n.id)) continue;
       // Split on the turn's final answer block only — a review's findings live
       // there, not in the earlier narration/scratchpad that `result` also joins in.
       const src = n.finalResult ?? n.result;
@@ -283,7 +334,7 @@ export default function App() {
       m.set(n.id, { items, shown });
     }
     return m;
-  }, [nodes, splitOverride]);
+  }, [nodes, splitOverride, fanoutInfo]);
 
   // Split/merge a review node's findings by hand — the fallback when auto-detect
   // misses a review (or fires on a list you'd rather keep whole).
@@ -601,6 +652,81 @@ export default function App() {
     return list;
   }, [nodes, pendings, findingInfo]);
 
+  // The per-node actions — split / spin-up / merge — computed once and consumed by
+  // BOTH the canvas card and the inspector's conversation flow, so the same reply
+  // offers the same affordances in both places (the flow is where you read the
+  // reply; the card is the at-a-glance handle). Keyed by node id; also exposes the
+  // merge helpers the gather edges need.
+  const nodeActions = useMemo(() => {
+    const isMerge = (n) => MERGE_TAG_RE.test(n.prompt || "");
+    const byId = new Map(allNodes.map((n) => [n.id, n]));
+    const hasChild = new Set(allNodes.map((n) => n.parentId).filter(Boolean));
+    const realKids = new Map();
+    for (const n of allNodes) {
+      if (!n.parentId || n.kind === "summary" || n.kind === "finding") continue;
+      if (!realKids.has(n.parentId)) realKids.set(n.parentId, []);
+      realKids.get(n.parentId).push(n);
+    }
+    const branchesOf = (id) => (realKids.get(id) || []).filter((k) => !isMerge(k));
+    // Follow a branch's single non-merge-child chain down to its current tip, so a
+    // merge combines each branch's LATEST work rather than the branch node itself.
+    // A branch that sub-forked (≥2 kids) or has no child yet is its own leaf.
+    const leafOf = (node) => {
+      let cur = node;
+      for (;;) {
+        const kids = branchesOf(cur.id);
+        if (kids.length !== 1) return cur;
+        cur = kids[0];
+      }
+    };
+    // Recover the fan a merge gathered: from its anchor leaf, walk up to the
+    // nearest ancestor with ≥2 branches, then take each branch's leaf.
+    const mergeFan = (mergeNode) => {
+      const anchorLeaf = byId.get(mergeNode.parentId);
+      if (!anchorLeaf) return null;
+      let cur = anchorLeaf;
+      let fanRoot = null;
+      while (cur?.parentId) {
+        const parent = byId.get(cur.parentId);
+        if (!parent) break;
+        if (branchesOf(parent.id).length >= 2) {
+          fanRoot = parent;
+          break;
+        }
+        cur = parent;
+      }
+      if (!fanRoot) return null;
+      return { fanRoot, anchorLeaf, leaves: branchesOf(fanRoot.id).map(leafOf) };
+    };
+    const map = new Map();
+    for (const n of allNodes) {
+      if (n.kind === "summary" || n.kind === "finding") continue;
+      const branches = branchesOf(n.id);
+      // The merge combines each branch's leaf (its latest work), so "already
+      // merged" = one of those leaves has a merge child, and streaming is checked
+      // on the leaves too.
+      const leaves = branches.map(leafOf);
+      map.set(n.id, {
+        canSplit: findingInfo.has(n.id),
+        split: findingInfo.get(n.id)?.shown ?? false,
+        // A fan-out proposal — hidden once spun up this session, or once the node
+        // already has children (so a reload doesn't re-offer and double-spawn).
+        canSpinUp: fanoutInfo.has(n.id) && !spunUp.has(n.id) && !hasChild.has(n.id),
+        spinCount: fanoutInfo.get(n.id)?.items.length ?? 0,
+        // ≥2 real branches, every leaf finished, and not already merged. All
+        // derived, so the button hides across reloads, and the instant the merge
+        // turn starts streaming.
+        canMerge:
+          !n.streaming &&
+          branches.length >= 2 &&
+          leaves.every((b) => !b.streaming) &&
+          !leaves.some((leaf) => (realKids.get(leaf.id) || []).some(isMerge)),
+        mergeCount: branches.length,
+      });
+    }
+    return { map, isMerge, branchesOf, byId, leafOf, mergeFan };
+  }, [allNodes, findingInfo, fanoutInfo, spunUp]);
+
   // Persistent per-tree horizontal slots, so a tree keeps its x position across
   // renders and forking one tree never shifts another.
   const treeSlots = useRef(new Map());
@@ -611,11 +737,47 @@ export default function App() {
   // layout out of the render path that reacts to selection/highlight changes.
   const layout = useMemo(() => {
     const pos = layoutTree(allNodes, treeSlots.current, dims);
+    // A merge forks from the middle branch (see mergeBranches), so the tree layout
+    // drops it inline with the OTHER branches' children — same row as its cousins.
+    // Push it (and any subtree it grew) a row below the whole fan it gathers from,
+    // so it visibly sits under the convergence rather than beside it.
+    const { isMerge, mergeFan } = nodeActions;
+    const kids = new Map();
+    for (const n of allNodes) {
+      if (!n.parentId) continue;
+      if (!kids.has(n.parentId)) kids.set(n.parentId, []);
+      kids.get(n.parentId).push(n.id);
+    }
+    const heightOf = (id) => dims.get(id)?.height || 100;
+    for (const n of allNodes) {
+      if (!isMerge(n) || !n.parentId) continue;
+      const fan = mergeFan(n);
+      if (!fan) continue;
+      // Lowest bottom across the fan's leaves — the deepest row it gathers from.
+      let maxBottom = -Infinity;
+      for (const leaf of fan.leaves) {
+        if (leaf.id === n.id) continue;
+        const p = pos.get(leaf.id);
+        if (p) maxBottom = Math.max(maxBottom, p.y + heightOf(leaf.id));
+      }
+      const cur = pos.get(n.id);
+      if (!cur || maxBottom === -Infinity) continue;
+      const delta = maxBottom + 50 - cur.y; // 50 = V_GAP
+      if (delta <= 0) continue;
+      // Shift the merge and its whole subtree down by the same delta.
+      const stack = [n.id];
+      while (stack.length) {
+        const id = stack.pop();
+        const p = pos.get(id);
+        if (p) pos.set(id, { ...p, y: p.y + delta });
+        for (const c of kids.get(id) || []) stack.push(c);
+      }
+    }
     // Which nodes already have a child — the ⑂ button only makes sense there,
     // where it splits off a sibling branch. A leaf is continued via the composer.
     const hasChild = new Set(allNodes.map((n) => n.parentId).filter(Boolean));
     return { pos, hasChild };
-  }, [allNodes, dims, tidyNonce]);
+  }, [allNodes, dims, tidyNonce, nodeActions]);
 
   // Tidy the forest: trees keep a slot assigned once and never re-packed, so a
   // tree that grows wider than its original slot ends up overlapping its
@@ -630,7 +792,10 @@ export default function App() {
 
   const { rfNodes, rfEdges } = useMemo(() => {
     const { pos, hasChild } = layout;
-    const rfNodes = allNodes.map((n) => ({
+    const { map: actions, isMerge, mergeFan } = nodeActions;
+    const rfNodes = allNodes.map((n) => {
+      const acts = actions.get(n.id);
+      return {
       id: n.id,
       type: "canopy",
       position: pos.get(n.id) || { x: 0, y: 0 },
@@ -639,7 +804,7 @@ export default function App() {
       ...(dims.get(n.id) || {}),
       data: {
         id: n.id,
-        label: n.label,
+        label: isMerge(n) ? mergePromptLabel(n.prompt || "") : n.label,
         result: n.result,
         streaming: !!n.streaming,
         kind: n.kind,
@@ -654,11 +819,18 @@ export default function App() {
         // A finding card carries the finding it holds; selecting it opens the
         // finding in the inspector, where a reply forks the review to work on it.
         finding: n.finding,
-        // Real review node whose reply is a findings list — offer split/merge, and
-        // show whether it's currently broken out.
-        canSplit: findingInfo.has(n.id),
-        split: findingInfo.get(n.id)?.shown ?? false,
+        // The split / spin-up / merge affordances (shared with the inspector flow).
+        canSplit: acts?.canSplit ?? false,
+        split: acts?.split ?? false,
         onSplit: toggleSplit,
+        canSpinUp: acts?.canSpinUp ?? false,
+        spinCount: acts?.spinCount ?? 0,
+        onSpinUp: handleSpinUp,
+        canMerge: acts?.canMerge ?? false,
+        mergeCount: acts?.mergeCount ?? 0,
+        onMerge: handleMerge,
+        // This node is itself a merge — the convergence of a fan of branches.
+        isMerge: isMerge(n),
         // Detect a pasted stack trace so the card can headline the error instead
         // of showing a meaningless truncation of the raw blob.
         errorPaste: n.kind !== "summary" && n.kind !== "finding" ? parseErrorPaste(n.prompt) : null,
@@ -674,7 +846,8 @@ export default function App() {
         onFork: forkFrom,
       },
       selected: n.id === selectedId,
-    }));
+    };
+    });
     const rfEdges = allNodes
       .filter((n) => n.parentId)
       .map((n) => ({
@@ -682,9 +855,34 @@ export default function App() {
         source: n.parentId,
         target: n.id,
         animated: n.streaming,
+        // A merge sits a row below the fan, so its tree edge (and the gather edges
+        // below) span the intervening reply row. Draw it straight so it reads as a
+        // branch converging into the merge, not a stepped line hugging a column
+        // behind those nodes.
+        ...(isMerge(n) ? { type: "straight" } : {}),
       }));
+    // A merge forks from one branch's leaf (its normal tree edge); draw the extra
+    // "gather" edges from the OTHER branches' leaves into it, so the fan visibly
+    // converges. The merge sits below the branch leaf it forked from (see
+    // mergeBranches — the middle one, for a centered gather).
+    for (const n of allNodes) {
+      if (!isMerge(n) || !n.parentId) continue;
+      const fan = mergeFan(n);
+      if (!fan) continue;
+      for (const leaf of fan.leaves) {
+        if (leaf.id === fan.anchorLeaf.id) continue; // that pairing is the tree edge
+        rfEdges.push({
+          id: `gather-${leaf.id}->${n.id}`,
+          source: leaf.id,
+          target: n.id,
+          type: "straight",
+          className: "gatherEdge",
+          animated: n.streaming,
+        });
+      }
+    }
     return { rfNodes, rfEdges };
-  }, [allNodes, layout, selectedId, inViewId, onAnswer, forkFrom, toggleSplit, togglePin, toggleArchive, findingInfo, dims, readyIds]);
+  }, [allNodes, layout, nodeActions, selectedId, inViewId, onAnswer, forkFrom, toggleSplit, togglePin, toggleArchive, handleSpinUp, handleMerge, dims, readyIds]);
 
   // Camera: frame the canvas once, on the initial load, via ReactFlow's own
   // `fitView` prop — and then never move it automatically again. Every automatic
@@ -775,8 +973,10 @@ export default function App() {
         ...ps,
         { tempId, parentId: displayParentId, label: text, result: "", perms: [], segments: [], turnId: null, auto: false, images, mode: turnMode },
       ]);
-      // Follow the new branch in the chat as it streams.
-      setSelectedId(tempId);
+      // Follow the new branch in the chat as it streams — unless the caller opts
+      // out (a fan-out spawns several at once and only selects the first, letting
+      // the rest surface via the ready-badge/toast path as they land).
+      if (opts.select !== false) setSelectedId(tempId);
 
       const abort = runTurn(
         { prompt: text, parentId, mode: turnMode, images, workspace },
@@ -857,6 +1057,60 @@ export default function App() {
     },
     [modes, newRootMode, rootOf, patchPending, pushToast, workspace]
   );
+
+  // Spin a fan-out proposal into parallel branches: fork one real turn off the
+  // proposing node per proposed track. Each fork inherits the whole thread (the
+  // plan included) via --fork-session, so we just tell it to carry out its slice.
+  // They stream concurrently as sibling trunks — DESIGN.md's "run parallel work".
+  // Select the first so the inspector follows one; the rest land as ready badges.
+  const spinUp = useCallback(
+    (id) => {
+      const info = fanoutInfo.get(id);
+      if (!info) return;
+      info.items.forEach((it, i) => {
+        const slice = (it.body || "").trim() || it.headline;
+        const branchPrompt = `Focus on just this part of your plan and carry it out now, then report back:\n\n${slice}`;
+        startTurn(id, branchPrompt, [], { select: i === 0 });
+      });
+      setSpunUp((prev) => new Set(prev).add(id));
+    },
+    [fanoutInfo, startTurn]
+  );
+  // Keep the ref the rfNodes memo reaches through pointed at the current spinUp.
+  useEffect(() => {
+    spinUpRef.current = spinUp;
+  }, [spinUp]);
+
+  // Converge a node's fanned-out branches back into one. There's no primitive to
+  // union several forked sessions, so the merge is a fresh synthesis turn: gather
+  // each branch's final output as text and fork one turn that combines them. Fork
+  // from the MIDDLE branch — that branch's own work is then in-session for free,
+  // and the merge sits centered under the fan so the gather edges converge evenly.
+  const mergeBranches = useCallback(
+    (id) => {
+      const { branchesOf, leafOf } = nodeActions;
+      const branches = branchesOf(id);
+      if (branches.length < 2) return;
+      // Merge each branch's LEAF — the latest work down that branch — not the
+      // branch node itself. The merge forks from the middle leaf so that thread is
+      // in-session for free, and the merge sits centered under the fan.
+      const leaves = branches.map(leafOf);
+      if (leaves.some((l) => l.streaming)) return;
+      const anchor = leaves[Math.floor(leaves.length / 2)];
+      const digest = branches
+        .map((b, i) => `— Branch ${i + 1} (${b.label}):\n${(leaves[i].finalResult ?? leaves[i].result ?? "").trim()}`)
+        .join("\n\n");
+      const prompt =
+        `These parallel branches each carried out one part of the plan. ` +
+        `Here's what each produced:\n\n${digest}\n\n` +
+        `Combine them into a single coherent result.\n\n(Canopy: merge)`;
+      startTurn(anchor.id, prompt);
+    },
+    [nodeActions, startTurn]
+  );
+  useEffect(() => {
+    mergeRef.current = mergeBranches;
+  }, [mergeBranches]);
 
   // Bottom composer: seed a root (nothing selected) or continue the selected node.
   const submit = useCallback(
@@ -1019,6 +1273,7 @@ export default function App() {
             setComposingNew(false);
           }}
           fitView
+          defaultEdgeOptions={{ type: "smoothstep" }}
           minZoom={0.15}
           proOptions={{ hideAttribution: true }}
         >
@@ -1130,7 +1385,11 @@ export default function App() {
                 data-node-id={n.id}
                 className={`exchange${n.id === selected.id ? " current" : ""}`}
               >
-                <div className="msg user">{n.prompt || <span className="muted">—</span>}</div>
+                <div className="msg user">
+                  {MERGE_TAG_RE.test(n.prompt || "")
+                    ? mergePromptLabel(n.prompt)
+                    : n.prompt || <span className="muted">—</span>}
+                </div>
                 {n.images?.length > 0 && (
                   <div className="thumbs threadThumbs">
                     {n.images.map((img) => (
@@ -1188,6 +1447,32 @@ export default function App() {
                 {(n.perms || []).map((p) => (
                   <PermPrompt key={p.requestId} perm={p} onAnswer={onAnswer} />
                 ))}
+                {(() => {
+                  // The same split / spin-up / merge actions the card offers, inline
+                  // in the flow where you're actually reading the reply. Skipped
+                  // while streaming — the reply, and what it affords, isn't settled.
+                  const a = !n.streaming && nodeActions.map.get(n.id);
+                  if (!a || (!a.canSplit && !a.canSpinUp && !a.canMerge)) return null;
+                  return (
+                    <div className="flowActions">
+                      {a.canSpinUp && (
+                        <button className="spinBtn" onClick={() => spinUp(n.id)}>
+                          ⑂ spin up {a.spinCount} branches
+                        </button>
+                      )}
+                      {a.canMerge && (
+                        <button className="mergeBtn" onClick={() => mergeBranches(n.id)}>
+                          ⤚ merge {a.mergeCount} branches
+                        </button>
+                      )}
+                      {a.canSplit && (
+                        <button className="splitBtn" onClick={() => toggleSplit(n.id)}>
+                          {a.split ? "⤺ merge findings" : "⑃ split into findings"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
               )
             )}

@@ -45,7 +45,10 @@ body {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   background: #DDE6CF;
-  z-index: 5;
+  /* A flex item with a z-index establishes a stacking context, so this value
+     also governs the ws-picker dropdown nested inside. Keep it above the
+     inspector (6) and its resizer (8) or the dropdown hides behind them. */
+  z-index: 10;
 }
 .brand {
   font-weight: 700;
@@ -334,6 +337,27 @@ body {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(79, 122, 63, 0.18);
 }
+/* A merged node — the convergence of a fan of branches. A left accent bar plus a
+   floating "⤚ merged" badge mark where it came from. */
+.nodeCard.merged {
+  border-left: 3px solid var(--accent);
+}
+.mergeBadge {
+  position: absolute;
+  top: -9px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 1px 4px rgba(79, 122, 63, 0.35);
+}
 .nodeCard.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(79, 122, 63, 0.35);
@@ -354,6 +378,16 @@ body {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+/* Node action buttons sit on their own row under the title — not crammed into the
+   title's flex row, where split + merge + fork together squeezed it to one letter
+   per line. They wrap if several are present. */
+.nodeTools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 .forkBtn {
   background: transparent;
@@ -385,6 +419,63 @@ body {
   color: #C9A227;
   border-color: #C9A227;
   background: transparent;
+}
+/* A consequential action (it launches real turns), so it reads as a filled
+   accent button rather than the ghost split/fork controls beside it. */
+.spinBtn {
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.spinBtn:hover {
+  filter: brightness(1.08);
+}
+/* Converge action — the counterpart to spin-up. Outlined in the accent rather
+   than filled, so on a node that offers both, "spin up" (start work) reads as the
+   primary and "merge" (gather it back) as the quieter follow-up. */
+.mergeBtn {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mergeBtn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+/* The same actions inline in the inspector's conversation flow, below the reply
+   they act on. Roomier than the compact card buttons — this is where you read and
+   decide, so the tap targets earn the extra size. */
+.flowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 2px;
+}
+.flowActions button {
+  font-size: 12px;
+  padding: 4px 11px;
+}
+/* Gather edges: the extra branch→merge links that show the fan converging. Dashed
+   and a touch faded so they read as "brought together here", distinct from the
+   solid parent→child spine. */
+.react-flow__edge.gatherEdge .react-flow__edge-path {
+  stroke: var(--accent);
+  stroke-dasharray: 5 4;
+  stroke-opacity: 0.55;
 }
 .forkIco {
   display: inline-block;
