@@ -5,7 +5,7 @@ import react from "@vitejs/plugin-react";
 // workspace. CANOPY_PORT picks the API server to proxy to; CANOPY_WEB_PORT
 // picks this dev server's port (Vite auto-increments if it's taken).
 const apiPort = process.env.CANOPY_PORT || 8787;
-const webPort = Number(process.env.CANOPY_WEB_PORT) || 5173;
+const webPort = Number(process.env.CANOPY_WEB_PORT) || 8788;
 
 export default defineConfig({
   plugins: [react()],

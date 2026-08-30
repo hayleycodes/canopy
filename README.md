@@ -28,7 +28,7 @@ may not offer account login as a hosted service; a local tool you run yourself
 is fine).
 
 ```
-Browser (localhost:5173)   the tree canvas — pan, zoom, fork, chat, approve
+Browser (localhost:8788)   the tree canvas — pan, zoom, fork, chat, approve
         │  /api (SSE)
 Local Node server (:8787)  reconstructs the tree from disk, shells out to the CLI
         │
@@ -76,8 +76,8 @@ npm install
 CANOPY_WORKSPACE=/path/to/your/project npm run dev
 ```
 
-Open **http://localhost:5173**. (With no `CANOPY_WORKSPACE`, the default is the
-directory you launched from.) The web app is on `:5173` and proxies `/api` to
+Open **http://localhost:8788**. (With no `CANOPY_WORKSPACE`, the default is the
+directory you launched from.) The web app is on `:8788` and proxies `/api` to
 the server on `:8787`.
 
 Seed a conversation in the composer, click a node to open its chat, and use the
