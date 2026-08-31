@@ -378,6 +378,12 @@ body {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+  /* A prompt can be a whole pasted trace; clamp it so the card stays a preview
+     instead of stretching to the paste's full height. */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 /* Node action buttons sit on their own row under the title — not crammed into the
    title's flex row, where split + merge + fork together squeezed it to one letter
