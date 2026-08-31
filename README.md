@@ -104,18 +104,11 @@ screen at once is just two tabs**: open a second tab and switch it to another
 repo — both talk to the same server on `:8787`, and the URL tells you which tab
 is which.
 
-## Running the spikes
+## Design notes
 
-The spikes proved the core seams before the app existed. Run them from a folder
-VS Code currently has open:
-
-```bash
-node spike.mjs      # forking produces a real tree (root → two parallel branches)
-node spike-ide.mjs  # a forked branch edits the workspace VS Code has open
-```
-
-See [DESIGN.md](./DESIGN.md) for what each proved — and the one thing that
-didn't (live IDE diagnostics in headless mode).
+See [DESIGN.md](./DESIGN.md) for the core seams and how they were proven on a
+real machine — including the one thing that didn't work (live IDE diagnostics in
+headless mode).
 
 ## Known limits
 
