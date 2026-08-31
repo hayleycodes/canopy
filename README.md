@@ -9,9 +9,7 @@ any node and a new branch appears. And because it drives the **Claude Code**
 engine, any branch can edit the code in your open workspace — you drive from the
 tree instead of the editor.
 
-> Status: **working prototype.** The local server + tree canvas run; you can
-> seed conversations, fork branches, stream replies, and approve edits with a
-> diff preview. See the roadmap for what's still open.
+**🚨 Canopy is 100% vibe coded, install and use at your won peril 🚨**
 
 ## Why it can exist
 
@@ -45,6 +43,14 @@ runs on your Claude account. That single fact decides the architecture.
 - **Trees you can fork.** Every turn is a node; fork any node to split a branch.
   Run several branches at once — they stream concurrently, so thinking on one
   never blocks another.
+- **Fan out and merge.** When a reply proposes splitting work into parallel
+  tracks, a **⑂ spin up N** button forks each track into its own concurrent turn.
+  Once they finish, **⤚ merge** brings a fan of branches back into one synthesis
+  node that combines what each produced.
+- **Reviews break into cards.** A review reply — a list of findings — splits into
+  one card per finding, each with its file:line. Reply to a card to fork a branch
+  scoped to just that finding. (A turn declares this structure itself, so it's not
+  guesswork — see the `canopy:findings` block in the engine's system preamble.)
 - **Reads from Claude Code's own store.** Canopy doesn't keep its own copy of
   your chats — it reconstructs the fork tree straight from
   `~/.claude/projects/<workspace>/*.jsonl` (matching branches by their shared
@@ -59,6 +65,9 @@ runs on your Claude account. That single fact decides the architecture.
   or run a command, you see the **diff** and Allow / Deny it — right in the tree.
 - **Edits your open workspace.** Turns run in a target repo and write to disk, so
   changes show up in the VS Code window you have open on that folder.
+- **Pin and archive.** Pin the trees you're actively working in so they stay on
+  the canvas, and archive the ones you're done with to clear them away. Both
+  survive a restart (saved under `~/.canopy/`).
 
 ## Requirements
 
@@ -115,8 +124,9 @@ didn't (live IDE diagnostics in headless mode).
   filters out `-p`/SDK sessions by design.
 - **Write previews show the new content, not a diff against the existing file**
   (edits show a true diff).
-- **Canopy metadata isn't persisted** — permission modes and layout live in
-  memory; only the conversations (on disk) survive a restart.
+- **Permission mode and canvas layout aren't persisted** — they live in memory
+  and reset on restart. (Pins, archived trees, and fork lineage *are* saved, under
+  `~/.canopy/`; the conversations themselves live in Claude Code's own store.)
 
 ## Name
 
