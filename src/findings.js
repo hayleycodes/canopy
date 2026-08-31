@@ -121,6 +121,9 @@ function collectItems(lines, startRe) {
 // back to a plain/heading numbered list for reviews written outside Canopy — and
 // there a lone item isn't a list, so require two.
 export function findingItems(text) {
+  // The model's own declared findings win — structured, and no guesswork.
+  const declared = findingBlockItems(text);
+  if (declared.length) return declared;
   const lines = (text || "").split(/\r?\n/);
   const explicit = collectItems(lines, FINDING_HEADING);
   if (explicit.length) return explicit;
@@ -156,6 +159,8 @@ function hasSectionAfterList(text, firstMarker) {
 // the lead-in, OR most items citing a real file:line location.
 export function looksLikeReview(text, items = findingItems(text)) {
   if (!items.length) return false;
+  // A declared canopy:findings block is the model's own intent — always split.
+  if (findingBlockItems(text).length) return true;
   // Our own format is unambiguous — always split, even a single finding.
   if (hasExplicitFindings(text)) return true;
   if (items.length < 2) return false;
@@ -205,10 +210,69 @@ export function looksLikeFanout(text, items = findingItems(text)) {
   return FANOUT_FRAMING.test(text || "");
 }
 
+// ── Declared structure: the turn tells Canopy its own shape ─────────────────
+// Rather than only infer a reply's structure from its prose (all the heuristics
+// above), we ask a turn to *declare* it in a fenced ```canopy:<kind> code block
+// holding a JSON array (see CANOPY_PREAMBLE in the engine). Two kinds:
+//   canopy:fanout    parallel tracks to spin up as branches — {title, task?}
+//   canopy:findings  review findings to break into cards     — {title, file?, detail?}
+// When present we trust it over the regex: it's the model reporting its own intent,
+// and each item arrives structured instead of re-parsed out of a numbered list. The
+// closing fence is optional so a still-streaming block parses cleanly once complete.
+const canopyBlockRe = (kind) =>
+  new RegExp("```canopy:" + kind + "\\s*\\n([\\s\\S]*?)(?:\\n```|$)", "i");
+const FANOUT_BLOCK = canopyBlockRe("fanout");
+const FINDINGS_BLOCK = canopyBlockRe("findings");
+
+// Parse a declared block into items shaped like collectItems' output ({ n, file,
+// headline, body }), so declared and inferred items are consumed identically. Each
+// JSON entry is an object (or a bare string, used as the title). task/detail both
+// map to the body. [] when there's no block, the JSON is malformed/not an array,
+// or it holds fewer than two items (a lone item isn't a split worth surfacing).
+function parseCanopyBlock(text, re) {
+  const m = (text || "").match(re);
+  if (!m) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(m[1].trim());
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const items = parsed
+    .map((entry, i) => {
+      const o = typeof entry === "string" ? { title: entry } : entry || {};
+      if (!o.title) return null;
+      return {
+        n: i + 1,
+        file: o.file ? String(o.file).trim() : null,
+        headline: String(o.title).trim(),
+        body: String(o.task ?? o.detail ?? o.title).trim(),
+      };
+    })
+    .filter(Boolean);
+  return items.length >= 2 ? items : [];
+}
+
+export const fanoutBlockItems = (text) => parseCanopyBlock(text, FANOUT_BLOCK);
+export const findingBlockItems = (text) => parseCanopyBlock(text, FINDINGS_BLOCK);
+
+// Every declared canopy block stripped out, for rendering — they're machine markers,
+// not prose the human should see as raw JSON. Eats the blank lines around each and
+// tolerates an unterminated block, so a mid-stream reply never flashes half-JSON.
+export function stripCanopyBlocks(text) {
+  return (text || "")
+    .replace(/\n*```canopy:(?:fanout|findings)\s*\n[\s\S]*?(?:\n```|$)\n*/gi, "\n\n")
+    .trimEnd();
+}
+
 // The items only when the reply proposes a parallel fan-out; [] otherwise. Feeds
 // the node's manual "spin up N branches" button — each item becomes a real forked
-// turn off the proposing node.
+// turn off the proposing node. Prefers the model's own declared block; falls back
+// to the prose heuristic for turns that describe a fan-out but omit the marker.
 export function fanoutItems(text) {
+  const declared = fanoutBlockItems(text);
+  if (declared.length) return declared;
   const items = findingItems(text);
   return looksLikeFanout(text, items) ? items : [];
 }

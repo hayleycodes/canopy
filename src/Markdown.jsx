@@ -1,6 +1,7 @@
 import { memo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { stripCanopyBlocks } from "./findings.js";
 
 // A copy button that flashes a checkmark for a moment after copying. Shared by
 // the whole-block button and the per-line buttons.
@@ -76,7 +77,7 @@ function Markdown({ children }) {
   return (
     <div className="md">
       <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
-        {children || ""}
+        {stripCanopyBlocks(children)}
       </ReactMarkdown>
     </div>
   );
