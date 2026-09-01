@@ -292,30 +292,31 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     return m;
   };
   const roots = sessions.filter((s) => !s.parentId);
-  if (limit > 0 || archived.size) {
-    let keepRoots;
-    if (limit > 0) {
-      keepRoots = roots
-        .map((r) => ({ id: r.id, act: subtreeMax(r.id) }))
-        .sort((a, b) => b.act.localeCompare(a.act))
-        .slice(0, limit)
-        .map((r) => r.id);
-      // Pinned trees are kept on top of the recency window, so an older pinned
-      // conversation stays on the canvas even once `limit` newer ones exist.
-      for (const r of roots) if (pinned.has(r.id) && !keepRoots.includes(r.id)) keepRoots.push(r.id);
-    } else {
-      keepRoots = roots.map((r) => r.id); // unbounded — everything but archives
-    }
-    // Archived trees are pulled off the canvas regardless of recency or pin.
-    keepRoots = keepRoots.filter((id) => !archived.has(id));
-    const keep = new Set();
-    const collect = (id) => {
-      keep.add(id);
-      for (const c of children.get(id) || []) collect(c);
-    };
-    keepRoots.forEach(collect);
-    sessions = sessions.filter((s) => keep.has(s.id));
+  // Decide which whole trees stay on the canvas. Everything else — aged out past
+  // the recency limit, or explicitly archived — lives only in the drawer.
+  let keepRoots;
+  if (limit > 0) {
+    keepRoots = roots
+      .map((r) => ({ id: r.id, act: subtreeMax(r.id) }))
+      .sort((a, b) => b.act.localeCompare(a.act))
+      .slice(0, limit)
+      .map((r) => r.id);
+    // Pinned trees are kept on top of the recency window, so an older pinned
+    // conversation stays on the canvas even once `limit` newer ones exist.
+    for (const r of roots) if (pinned.has(r.id) && !keepRoots.includes(r.id)) keepRoots.push(r.id);
+  } else {
+    keepRoots = roots.map((r) => r.id); // unbounded — everything but archives
   }
+  // Archived trees are pulled off the canvas regardless of recency or pin.
+  keepRoots = keepRoots.filter((id) => !archived.has(id));
+  const keptRoots = new Set(keepRoots);
+  const keep = new Set();
+  const collect = (id) => {
+    keep.add(id);
+    for (const c of children.get(id) || []) collect(c);
+  };
+  keepRoots.forEach(collect);
+  sessions = sessions.filter((s) => keep.has(s.id));
 
   const byTime = (a, b) => (a.firstTs || "").localeCompare(b.firstTs || "");
   sessions.sort(byTime);
@@ -409,13 +410,17 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     .filter((n) => n.parentId)
     .map((n) => ({ id: `${n.parentId}->${n.id}`, source: n.parentId, target: n.id }));
 
-  // The drawer's list of archived trees still present on disk: their root id and
-  // a human title, so each can be shown and unarchived. `treeTitle` reads from
+  // The drawer's list of every off-canvas tree still present on disk: those
+  // explicitly archived AND those aged out past the recency limit. Each carries
+  // its root id, a human title, and whether it was archived (vs. merely aged out)
+  // so the client can restore it the right way. Most-recently-active first, so
+  // the drawer reads like a history. `treeTitle`/`subtreeMax` read from
   // `byId`/`children`, which still hold every session (the filter above only
-  // reassigned `sessions`), so archived roots resolve a title fine.
+  // reassigned `sessions`), so off-canvas roots resolve fine.
   const archivedList = roots
-    .filter((r) => archived.has(r.id))
-    .map((r) => ({ rootId: r.id, label: treeTitle(r.id) }));
+    .filter((r) => !keptRoots.has(r.id))
+    .map((r) => ({ rootId: r.id, label: treeTitle(r.id), archived: archived.has(r.id), lastTs: subtreeMax(r.id) }))
+    .sort((a, b) => (b.lastTs || "").localeCompare(a.lastTs || ""));
 
   const result = { nodes: outNodes, edges, archived: archivedList };
   if (sig) graphCache = { key: sig, result };
