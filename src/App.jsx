@@ -537,6 +537,12 @@ export default function App() {
     if (composingNew) replyRef.current?.focus();
   }, [composingNew]);
 
+  // Also focus the reply box when you select a node, so you can type a reply
+  // straight away — but not while it's streaming (the box is disabled then).
+  useEffect(() => {
+    if (selectedId && !selected?.streaming) replyRef.current?.focus();
+  }, [selectedId]);
+
   // When you pick a node (e.g. click it on the canvas), scroll the inspector to
   // that node's exchange so the thread jumps to the item you selected instead of
   // leaving you wherever you'd scrolled to.
