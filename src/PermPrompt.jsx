@@ -67,10 +67,16 @@ function Preview({ toolName, input = {} }) {
 // pick from options. We render each question with its choices and feed the picks
 // back as the tool's `answers` (keyed by question text), which is what the CLI
 // reads from updatedInput to produce the tool result.
+// Sentinel label for the always-available "Other" choice, whose real answer is
+// whatever the human types into the free-text box.
+const OTHER = "__other__";
+
 function QuestionPrompt({ requestId, input, onAnswer }) {
   const questions = input?.questions || [];
   // selections[i] is a Set of chosen labels for question i.
   const [selections, setSelections] = useState(() => questions.map(() => new Set()));
+  // customTexts[i] is the free text typed when "Other" is chosen for question i.
+  const [customTexts, setCustomTexts] = useState(() => questions.map(() => ""));
 
   const toggle = (qi, label, multi) => {
     setSelections((prev) =>
@@ -84,12 +90,25 @@ function QuestionPrompt({ requestId, input, onAnswer }) {
     );
   };
 
-  const ready = questions.every((_, i) => selections[i].size > 0);
+  const setCustom = (qi, text) => {
+    setCustomTexts((prev) => prev.map((t, i) => (i === qi ? text : t)));
+  };
+
+  // A question is answered once it has a real pick — or, when "Other" is chosen,
+  // once its text box is non-empty (a bare "Other" says nothing to feed back).
+  const ready = questions.every((_, i) => {
+    const set = selections[i];
+    if (set.size === 0) return false;
+    if (set.has(OTHER) && !customTexts[i].trim()) return false;
+    return true;
+  });
 
   const submit = () => {
     const answers = {};
     questions.forEach((q, i) => {
-      answers[q.question] = [...selections[i]].join(", ");
+      answers[q.question] = [...selections[i]]
+        .map((label) => (label === OTHER ? customTexts[i].trim() : label))
+        .join(", ");
     });
     onAnswer(requestId, "allow", { ...input, answers });
   };
@@ -116,7 +135,24 @@ function QuestionPrompt({ requestId, input, onAnswer }) {
                 </button>
               );
             })}
+            <button
+              className={`questionOpt${selections[qi].has(OTHER) ? " selected" : ""}`}
+              onClick={() => toggle(qi, OTHER, q.multiSelect)}
+            >
+              <div className="questionOptLabel">Other</div>
+              <div className="questionOptDesc">Type your own response</div>
+            </button>
           </div>
+          {selections[qi].has(OTHER) && (
+            <textarea
+              className="questionOther"
+              autoFocus
+              rows={2}
+              placeholder="Your response…"
+              value={customTexts[qi]}
+              onChange={(e) => setCustom(qi, e.target.value)}
+            />
+          )}
         </div>
       ))}
       <div className="permActions">
