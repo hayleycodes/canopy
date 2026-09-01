@@ -723,6 +723,23 @@ body {
   margin-top: 2px;
   line-height: 1.35;
 }
+.questionOther {
+  margin-top: 4px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid #6E9E5B;
+  border-radius: 6px;
+  background: #FFFFFFcc;
+  font: inherit;
+  font-size: 12px;
+  color: #33281B;
+  resize: vertical;
+}
+.questionOther:focus {
+  outline: none;
+  border-color: #4F7A3F;
+}
 /* An AskUserQuestion after it's been answered, shown in the conversation flow. */
 .askResolved {
   margin-top: 8px;
@@ -1419,12 +1436,23 @@ button.ghost.on {
 .drawerItem:hover {
   background: #F1EEE3;
 }
-.drawerItemLabel {
+.drawerItemText {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.drawerItemLabel {
   font-size: 13px;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawerItemTime {
+  font-size: 10px;
+  color: var(--muted);
   white-space: nowrap;
 }
 .drawerRestore {

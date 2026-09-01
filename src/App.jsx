@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, { Background, Controls, MiniMap } from "reactflow";
 import "reactflow/dist/style.css";
+import { formatRelative } from "date-fns";
+import { enUS } from "date-fns/locale";
 
 import NodeCard from "./NodeCard.jsx";
 import ModeSelect, { MODES } from "./ModeSelect.jsx";
@@ -13,6 +15,29 @@ import { findingItems, looksLikeReview, fanoutItems } from "./findings.js";
 import { answerPermission, fetchConfig, fetchGraph, getWorkspace, openWorkspace, resetGraph, runTurn, setArchive, setPin, setTurnAuto } from "./api.js";
 
 const nodeTypes = { canopy: NodeCard };
+
+// A compact "when was this last touched" for the archived drawer, with the exact
+// time on hover via the title attr. date-fns's formatRelative gives meaningful
+// wording — "today", "yesterday", a weekday like "Friday" within the last week —
+// and we override its locale so it drops the "at 3:04 PM" tail and stays tiny;
+// anything older than a week falls back to a short date ("Sep 1").
+const relativeLocale = {
+  ...enUS,
+  formatRelative: (token) =>
+    ({
+      lastWeek: "eeee", // Friday
+      yesterday: "'yesterday'",
+      today: "'today'",
+      tomorrow: "'tomorrow'",
+      nextWeek: "eeee",
+      other: "MMM d", // Sep 1
+    })[token],
+};
+function relativeTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return formatRelative(d, new Date(), { locale: relativeLocale });
+}
 
 // Stable empty-images identity so a draft with no attachments doesn't hand a
 // fresh [] to consumers on every render.
@@ -1273,13 +1298,20 @@ export default function App() {
           <div className="drawerList">
             {archivedList.map((a) => (
               <div key={a.rootId} className="drawerItem">
-                <span className="drawerItemLabel" title={a.label}>
-                  {a.label}
-                </span>
+                <div className="drawerItemText">
+                  {a.lastTs && (
+                    <span className="drawerItemTime" title={new Date(a.lastTs).toLocaleString()}>
+                      {relativeTime(a.lastTs)}
+                    </span>
+                  )}
+                  <span className="drawerItemLabel" title={a.label}>
+                    {a.label}
+                  </span>
+                </div>
                 <button
                   className="drawerRestore"
                   title="Bring this conversation back onto the canvas"
-                  onClick={() => toggleArchive(a.rootId, false)}
+                  onClick={() => (a.archived ? toggleArchive(a.rootId, false) : togglePin(a.rootId, true))}
                 >
                   restore
                 </button>
