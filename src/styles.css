@@ -177,7 +177,13 @@ body {
   cursor: pointer;
   font-size: 13px;
   line-height: 1;
-  padding: 2px;
+  /* Icon stays small, but the tappable box is padded out so it's easy to hit. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 4px;
   border-radius: 6px;
   opacity: 0.35;
   filter: grayscale(1);
