@@ -289,7 +289,7 @@ body {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  padding: 1px;
+  padding: 4px;
   border: none;
   background: transparent;
   color: var(--muted);
@@ -322,10 +322,37 @@ body {
   gap: 4px;
 }
 .findingTag {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.1em;
   color: #9c7d1e;
+}
+.findingTagFileRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.findingTagFile {
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--muted);
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.findingTagFileRow:hover .findingFileCopy,
+.findingTagFileRow .findingFileCopy:focus-visible {
+  opacity: 1;
 }
 
 /* node cards */

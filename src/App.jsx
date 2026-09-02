@@ -43,6 +43,45 @@ function relativeTime(iso) {
 // fresh [] to consumers on every render.
 const EMPTY_IMAGES = [];
 
+// The file/line chip shown beside a finding's tag in the inspector, mirroring the
+// finding card's chip. Self-contained copied-state so several findings in one
+// thread each flip independently.
+function FindingFileChip({ file }) {
+  const [copied, setCopied] = useState(false);
+  const copy = (e) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(file).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      },
+      () => {},
+    );
+  };
+  return (
+    <span className="findingTagFileRow">
+      <span className="findingTagFile" title={file}>
+        <bdi>{file}</bdi>
+      </span>
+      <button
+        type="button"
+        className={`findingFileCopy${copied ? " copied" : ""}`}
+        title={copied ? "Copied!" : "Copy path"}
+        onClick={copy}
+      >
+        {copied ? (
+          "✓"
+        ) : (
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        )}
+      </button>
+    </span>
+  );
+}
+
 // Replying to a finding card tags the prompt with this suffix (see sendReply),
 // naming the finding it forked off. It's the durable record of that link — the
 // server only knows the branch forked the review session, not which finding — so
@@ -1440,7 +1479,10 @@ export default function App() {
                   data-node-id={n.id}
                   className={`exchange finding${n.id === selected.id ? " current" : ""}`}
                 >
-                  <div className="findingTag">◆ FINDING {n.finding.n}</div>
+                  <div className="findingTag">
+                    ◆ FINDING {n.finding.n}
+                    {n.finding.file && <FindingFileChip file={n.finding.file} />}
+                  </div>
                   <div className="msg assistant">
                     <Markdown>{n.finding.body}</Markdown>
                   </div>
