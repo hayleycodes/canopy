@@ -1245,7 +1245,7 @@ button.stopBtn:hover {
   margin: 0 0 8px;
   padding-left: 10px;
   border-left: 3px solid var(--border);
-  color: var(--muted);
+  color: #6C5D47;
 }
 .md table {
   border-collapse: collapse;
