@@ -309,3 +309,20 @@ test("a single-item proposal is not a fan-out", () => {
   assert.equal(looksLikeFanout(one), false);
   assert.equal(fanoutItems(one).length, 0);
 });
+
+test("a review whose prose says 'parallel' still splits, not fans out", () => {
+  // A real regression: an infra PR review whose finding #2 described "the clean
+  // parallel removal done in documents.yaml" tripped FANOUT_FRAMING on the bare
+  // adjective, so the node showed a spin-up button and never split its findings.
+  const review = `**Three findings, most severe first:**
+
+1. **Irreversible cutover** — removing the OAI grant revokes read access. \`svc.yaml:12\`
+
+2. **Incomplete removal in \`svc.yaml\`** — the dead mapping entries were left behind, unlike the clean parallel removal done in \`documents.yaml\` and \`static-assets.yaml\`.
+
+3. **Stale contradictory comment in \`cdn.yaml:7\`** — claims the origin is still on legacy OAI.`;
+  assert.ok(looksLikeReview(review));
+  assert.equal(looksLikeFanout(review), false);
+  assert.equal(fanoutItems(review).length, 0);
+  assert.equal(parseFindings(review).length, 3);
+});

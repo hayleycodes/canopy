@@ -196,9 +196,12 @@ export function parseFindings(text) {
 // this into three tracks". A review looks back ("I found 3 issues"); a fan-out
 // looks forward, and each of its items is a job you'd hand to its own branch. We
 // key on the decomposition intent, deliberately narrow to parallel-work language
-// (not a plain "investigate") so an ordinary numbered plan doesn't match.
+// (not a plain "investigate") so an ordinary numbered plan doesn't match. Bare
+// adjectival "parallel" is deliberately NOT here — it's a common review word ("the
+// parallel removal in documents.yaml", "a parallel test suite"); only the verb
+// forms ("parallelize") and the phrase "in parallel" signal actual fan-out intent.
 const FANOUT_FRAMING =
-  /\b(?:sub-?agents?|in parallel|parallel(?:i[sz]e|i[sz]ing|i[sz]ed)?|fan(?:ning)?[ -]?out|spin(?:ning)?[ -]?up|separate (?:branches|tracks|threads|investigations|agents|workstreams)|independent (?:branches|investigations|tracks|workstreams)|(?:three|four|several|multiple|two|\d+) (?:parallel|separate|independent|concurrent) (?:tracks|branches|threads|investigations|pieces|workstreams))\b/i;
+  /\b(?:sub-?agents?|in parallel|parallel(?:i[sz]e|i[sz]ing|i[sz]ed)|fan(?:ning)?[ -]?out|spin(?:ning)?[ -]?up|separate (?:branches|tracks|threads|investigations|agents|workstreams)|independent (?:branches|investigations|tracks|workstreams)|(?:three|four|several|multiple|two|\d+) (?:parallel|separate|independent|concurrent) (?:tracks|branches|threads|investigations|pieces|workstreams))\b/i;
 
 // Does this reply read as a proposal to fan work out into parallel branches? Same
 // shape as looksLikeReview — needs ≥2 enumerable items plus the framing — but keyed
@@ -207,6 +210,14 @@ const FANOUT_FRAMING =
 // after the list; the framing is strict enough that reviews don't trip it.
 export function looksLikeFanout(text, items = findingItems(text)) {
   if (items.length < 2) return false;
+  // A backward-looking review never fans out, even when its prose happens to use
+  // a word like "parallel" ("the clean parallel removal done in documents.yaml").
+  // The review signal — findings framing, per-item file:line citations — is far
+  // more specific than a stray verb, so the review wins the reply and keeps its
+  // finding cards instead of being hijacked into a "spin up N branches" button.
+  // (App gives fanoutInfo precedence over findingInfo, so a review that also
+  // tripped this would lose its findings entirely — see App's findingInfo memo.)
+  if (looksLikeReview(text, items)) return false;
   return FANOUT_FRAMING.test(text || "");
 }
 
