@@ -33,11 +33,17 @@ export function layoutTree(nodes, slots = new Map(), heights = new Map()) {
 
   // Stable order — by creation order (`order`), then id — so newly appearing
   // trees claim slots left to right in a predictable order.
-  roots.sort((a, b) => {
+  const byOrder = (a, b) => {
     const oa = byId.get(a)?.order ?? 0;
     const ob = byId.get(b)?.order ?? 0;
     return oa - ob || (a < b ? -1 : a > b ? 1 : 0);
-  });
+  };
+  roots.sort(byOrder);
+  // Siblings, too — so a newly forked child (higher `order`, or a pending node
+  // with order Infinity) lands in the rightmost column rather than wherever it
+  // happened to sit in the flat node array. Reparenting (finding replies, merges)
+  // otherwise leaves array position out of step with creation order.
+  for (const kids of children.values()) kids.sort(byOrder);
 
   // Lay out each tree in local (per-tree) coordinates: local column + y, plus the
   // tree each node belongs to and the tree's width in columns.
