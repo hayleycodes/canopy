@@ -322,8 +322,20 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
   sessions.sort(byTime);
 
   const nodes = sessions.map((s, i) => {
-    // This node's own turn is the tail after the shared ancestor prefix.
-    const tail = s.msgs.slice(s.parentLen);
+    // This node's own turn is the tail after the shared ancestor prefix. But the
+    // uuid-derived prefix (parentLen) lands SHORT when a fork rewrites the uuids
+    // of the history it copied — long/compacted parents trigger this, so only the
+    // first couple of uuids still match and sharedPrefixLen stops there. The slice
+    // then begins inside the parent's turn: it drags in the parent's own answer
+    // (the node echoes its parent) and its first user message is an empty
+    // tool_result turn, so the real prompt is lost and the label falls to
+    // "(untitled)". Correct it by advancing to this node's real opening prompt —
+    // the first user message carrying text at or after parentLen (a tool_result
+    // turn is role "user" but has no text). A no-op for healthy forks, whose tail
+    // already opens on the human's prompt.
+    const rel = s.msgs.slice(s.parentLen).findIndex((m) => m.role === "user" && m.text.trim());
+    const start = rel === -1 ? s.parentLen : s.parentLen + rel;
+    const tail = s.msgs.slice(start);
     const prompt = tail.find((m) => m.role === "user")?.text || "";
     // A turn with tool calls writes several assistant messages (narrate, call a
     // tool, narrate again); join them all so the persisted node matches what
