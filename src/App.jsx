@@ -95,7 +95,18 @@ const FINDING_REPLY_RE = /\(Re: your review finding — (.+)\)\s*$/;
 // read it back to (a) draw the gather edges from the other branches into it and
 // (b) hide the parent's "merge" button once one exists. Holds across reloads with
 // no separate bookkeeping. Anchored to the end so it survives the digest before it.
-const MERGE_TAG_RE = /\(Canopy: merge\)\s*$/;
+// The tag also records the ids of the leaves it gathered at merge time (a space-
+// separated list, uuids have no spaces or parens) so the fan is a fixed snapshot —
+// children added under a branch parent later can't be retroactively pulled in.
+const MERGE_TAG_RE = /\(Canopy: merge(?: [^)]*)?\)\s*$/;
+const MERGE_IDS_RE = /\(Canopy: merge ([^)]*)\)\s*$/;
+// The leaf ids a merge recorded, or null for a legacy merge with no list.
+function mergeLeafIds(prompt) {
+  const m = (prompt || "").match(MERGE_IDS_RE);
+  if (!m) return null;
+  const ids = m[1].trim().split(/\s+/).filter(Boolean);
+  return ids.length ? ids : null;
+}
 // A merge node's real prompt is a giant digest of every branch's output (fed to
 // the model so it can combine them). We never want to *show* that wall of text —
 // on the card and in the thread it reads as a short "Merging N branches…" line.
@@ -542,7 +553,7 @@ export default function App() {
   // Name the browser tab after the workspace so multiple instances are
   // distinguishable at a glance.
   useEffect(() => {
-    document.title = workspace ? `🌳 ${workspace.split("/").pop()}` : "🌳 Canopy";
+    document.title = workspace ? `${workspace.split("/").pop()}` : "Canopy";
   }, [workspace]);
 
   // Picking a real node drops the "new conversation" state — that node's thread
@@ -788,11 +799,18 @@ export default function App() {
         cur = kids[0];
       }
     };
-    // Recover the fan a merge gathered: from its anchor leaf, walk up to the
-    // nearest ancestor with ≥2 branches, then take each branch's leaf.
+    // Recover the fan a merge gathered. Prefer the leaf ids recorded on the merge
+    // at creation time (a fixed snapshot) — otherwise later-added children under a
+    // branch parent get re-derived into the fan and grow stray gather edges. Fall
+    // back to structural recovery only for legacy merges that carry no id list.
     const mergeFan = (mergeNode) => {
       const anchorLeaf = byId.get(mergeNode.parentId);
       if (!anchorLeaf) return null;
+      const ids = mergeLeafIds(mergeNode.prompt);
+      if (ids) {
+        const leaves = ids.map((id) => byId.get(id)).filter(Boolean);
+        if (leaves.length) return { fanRoot: null, anchorLeaf, leaves };
+      }
       let cur = anchorLeaf;
       let fanRoot = null;
       while (cur?.parentId) {
@@ -1202,7 +1220,9 @@ export default function App() {
       const prompt =
         `These parallel branches each carried out one part of the plan. ` +
         `Here's what each produced:\n\n${digest}\n\n` +
-        `Combine them into a single coherent result.\n\n(Canopy: merge)`;
+        `Combine them into a single coherent result.\n\n` +
+        // Record the leaves gathered here so the fan is fixed to this snapshot.
+        `(Canopy: merge ${leaves.map((l) => l.id).join(" ")})`;
       startTurn(anchor.id, prompt);
     },
     [nodeActions, startTurn]
