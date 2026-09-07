@@ -16,6 +16,38 @@ import { answerPermission, fetchConfig, fetchGraph, getWorkspace, openWorkspace,
 
 const nodeTypes = { canopy: NodeCard };
 
+// A short two-note chime for when a reply lands, synthesized with Web Audio so
+// there's no asset to ship. Lazily create one AudioContext and reuse it. Wrapped
+// in try/catch: audio can be blocked (no user gesture yet, autoplay policy) and a
+// missed ding should never break the turn that finished.
+let audioCtx = null;
+function playDing() {
+  try {
+    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = audioCtx;
+    if (ctx.state === "suspended") ctx.resume();
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    // Two soft sine notes (E5 then B5), each with a quick fade so it reads as a
+    // gentle chime rather than a beep.
+    [880, 1174.66].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      const t = now + i * 0.12;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.15, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+      osc.connect(g);
+      g.connect(gain);
+      osc.start(t);
+      osc.stop(t + 0.26);
+    });
+  } catch {}
+}
+
 // A compact "when was this last touched" for the archived drawer, with the exact
 // time on hover via the title attr. date-fns's formatRelative gives meaningful
 // wording — "today", "yesterday", a weekday like "Friday" within the last week —
@@ -1114,6 +1146,7 @@ export default function App() {
           onPermission: (req) =>
             patchPending(tempId, (p) => ({ ...p, perms: [...p.perms, req] })),
           onNode: async (node) => {
+            playDing(); // a reply just landed
             aborters.current.delete(tempId);
             tokenBuf.current.delete(tempId); // real node carries the full text
             // A finding reply re-hangs under its finding card via its prompt tag
