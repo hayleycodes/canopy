@@ -1167,12 +1167,15 @@ export default function App() {
             tokenBuf.current.delete(tempId);
             setError(msg);
             setPendings((ps) => ps.filter((p) => p.tempId !== tempId));
+            // A failed/disconnected turn may still have persisted most of itself
+            // to disk; pull the graph so it shows up instead of silently dropping.
+            refresh().catch(() => {});
           },
         }
       );
       aborters.current.set(tempId, abort);
     },
-    [modes, newRootMode, rootOf, patchPending, pushToken, pushToast, workspace]
+    [modes, newRootMode, rootOf, patchPending, pushToken, pushToast, workspace, refresh]
   );
 
   // Spin a fan-out proposal into parallel branches: fork one real turn off the
@@ -1248,7 +1251,12 @@ export default function App() {
     aborters.current.delete(tempId);
     setSelectedId((cur) => (cur === tempId ? parentId : cur));
     setPendings((ps) => ps.filter((p) => p.tempId !== tempId));
-  }, []);
+    // The CLI has usually already written most of this turn to disk by the time
+    // we kill it, so pull the graph again: a stopped turn then reappears with
+    // whatever it persisted (parented under its fork target) instead of vanishing
+    // until the next reload or completed turn.
+    refresh().catch(() => {});
+  }, [refresh]);
 
   // Switch a live turn to auto-approve so it stops prompting for permissions —
   // the escape hatch when you started a turn in manual mode by accident.
