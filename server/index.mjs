@@ -481,9 +481,21 @@ async function route(req, res) {
     // Disk (the CLI's own transcripts) is the source of truth, so restarts lose
     // nothing. The in-memory graph only backfills a just-finished turn whose
     // .jsonl hasn't flushed to disk yet.
-    const disk = loadWorkspaceGraph(workspace, MAX_TREES, loadLinks(workspace), loadPins(workspace), loadArchived(workspace));
+    const archived = loadArchived(workspace);
+    const disk = loadWorkspaceGraph(workspace, MAX_TREES, loadLinks(workspace), loadPins(workspace), archived);
     const have = new Set(disk.nodes.map((n) => n.id));
-    const extra = snapshot(workspace).nodes.filter((n) => !have.has(n.id));
+    let extra = snapshot(workspace).nodes.filter((n) => !have.has(n.id));
+    // The disk view already pulled archived trees off the canvas, but a
+    // just-created tree still lingers in the in-memory snapshot — and since the
+    // archive dropped it from `have`, it counts as `extra` and would be re-added.
+    // Drop any extra node whose tree root is archived so it stays off the canvas.
+    const extraById = new Map(extra.map((n) => [n.id, n]));
+    const rootIdOf = (n) => {
+      let cur = n;
+      while (cur.parentId && extraById.has(cur.parentId)) cur = extraById.get(cur.parentId);
+      return cur.id;
+    };
+    extra = extra.filter((n) => !archived.has(rootIdOf(n)));
     // Disk roots already carry a summary header; attachSummaries backfills one for
     // any in-memory `extra` root so its column isn't left heading-less.
     const nodes = attachSummaries([...disk.nodes, ...extra]);
