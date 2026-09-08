@@ -462,6 +462,11 @@ export function attachSummaries(nodes) {
       prompt: "",
       result: "",
       label: n.label || "Conversation",
+      // Carry the root id (and a default pin state) so this header's archive/pin
+      // buttons act on the real tree. Without it the header sends `undefined` and
+      // archiving/pinning silently no-ops — the disk path sets these too.
+      rootId: n.id,
+      pinned: false,
     });
     n.parentId = sumId; // the root now hangs beneath its summary
   }
