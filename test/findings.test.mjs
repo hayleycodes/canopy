@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findingItems, looksLikeReview, parseFindings, looksLikeFanout, fanoutItems } from "../src/findings.js";
+import { findingItems, looksLikeReview, parseFindings, looksLikeFanout, fanoutItems, stripCanopyBlocks } from "../src/findings.js";
 
 test("explicit `### Finding N:` headings split deterministically, even one", () => {
   const review = `## Summary
@@ -308,6 +308,39 @@ test("a single-item proposal is not a fan-out", () => {
 1. Just the one thing.`;
   assert.equal(looksLikeFanout(one), false);
   assert.equal(fanoutItems(one).length, 0);
+});
+
+test("a fanout that skips the prose list surfaces its titles when stripped", () => {
+  // The model declared the tracks only in the block and left a dangling intro —
+  // stripping the block must not leave the reader with nothing but a button.
+  const reply = `A few natural directions if you want to fan them out:
+
+\`\`\`canopy:fanout
+[{"title": "Wire up Realtime", "task": "add the channel"},
+ {"title": "Glide the carousel", "task": "flex track"},
+ {"title": "Fix the resize", "task": "toggle visibility"}]
+\`\`\``;
+  const out = stripCanopyBlocks(reply);
+  assert.match(out, /A few natural directions/);
+  assert.match(out, /Wire up Realtime/);
+  assert.match(out, /Glide the carousel/);
+  assert.match(out, /Fix the resize/);
+  assert.doesNotMatch(out, /canopy:fanout/);
+});
+
+test("a fanout that already wrote the prose list is not duplicated", () => {
+  // The intended shape: prose headings AND the block. Stripping must leave the
+  // prose untouched and not append a second copy of the titles.
+  const reply = `${FANOUT}
+
+\`\`\`canopy:fanout
+[{"title": "Live updates", "task": "realtime"},
+ {"title": "Gliding carousel", "task": "flex track"},
+ {"title": "Resize fix", "task": "toggle"}]
+\`\`\``;
+  const out = stripCanopyBlocks(reply);
+  assert.equal((out.match(/Gliding carousel/g) || []).length, 1);
+  assert.doesNotMatch(out, /canopy:fanout/);
 });
 
 test("a review whose prose says 'parallel' still splits, not fans out", () => {

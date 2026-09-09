@@ -268,13 +268,37 @@ function parseCanopyBlock(text, re) {
 export const fanoutBlockItems = (text) => parseCanopyBlock(text, FANOUT_BLOCK);
 export const findingBlockItems = (text) => parseCanopyBlock(text, FINDINGS_BLOCK);
 
+// Does the visible prose already lay the tracks out as a list the reader can see?
+// A numbered list, two-plus headings, or two-plus bullets all count. When none of
+// these are present the reply is just an intro (often ending in a colon) with no
+// options underneath it.
+function hasVisibleList(text) {
+  const lines = (text || "").split("\n");
+  if (lines.some((l) => /^\s*\d+[.)]\s+\S/.test(l))) return true;
+  if (lines.filter((l) => /^\s*[-*+]\s+\S/.test(l)).length >= 2) return true;
+  if (lines.filter((l) => /^\s*#{1,6}\s+\S/.test(l)).length >= 2) return true;
+  return false;
+}
+
 // Every declared canopy block stripped out, for rendering — they're machine markers,
 // not prose the human should see as raw JSON. Eats the blank lines around each and
 // tolerates an unterminated block, so a mid-stream reply never flashes half-JSON.
+//
+// A fan-out reply is meant to write its tracks up as prose AND declare them in the
+// block; the button is the extra affordance. But when the model declares the block
+// and skips the prose, stripping it leaves a dangling intro with only a "spin up N"
+// button and no options in sight. So if a fanout block declared tracks the prose
+// never lists, render the titles back in — the reader always sees what's on offer.
 export function stripCanopyBlocks(text) {
-  return (text || "")
+  const stripped = (text || "")
     .replace(/\n*```canopy:(?:fanout|findings)\s*\n[\s\S]*?(?:\n```|$)\n*/gi, "\n\n")
     .trimEnd();
+  const items = fanoutBlockItems(text);
+  if (items.length && !hasVisibleList(stripped)) {
+    const list = items.map((it) => `${it.n}. **${it.headline}**`).join("\n");
+    return `${stripped}\n\n${list}`;
+  }
+  return stripped;
 }
 
 // The items only when the reply proposes a parallel fan-out; [] otherwise. Feeds
