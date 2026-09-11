@@ -41,7 +41,8 @@ body {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 10px 16px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   background: #DDE6CF;
@@ -57,6 +58,19 @@ body {
   color: var(--muted);
   font-size: 13px;
   flex: 1;
+  /* As the flex spacer, the hint shrinks first when the bar gets crowded. Keep
+     it on one line and truncate rather than stacking a word per line. */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Below this width there isn't room to spare — drop the hint so the buttons
+   keep their full labels. */
+@media (max-width: 720px) {
+  .hint {
+    display: none;
+  }
 }
 .workspace-switch {
   position: relative;
@@ -1052,7 +1066,7 @@ button.stopBtn:hover {
 /* inspector */
 .inspector {
   position: absolute;
-  top: 52px;
+  top: var(--topbar-h, 52px);
   right: 0;
   bottom: 0;
   width: 360px;
@@ -1064,7 +1078,7 @@ button.stopBtn:hover {
 }
 .inspectorResizer {
   position: absolute;
-  top: 52px; /* below the topbar, matching .inspector */
+  top: var(--topbar-h, 52px); /* below the topbar, matching .inspector */
   bottom: 0;
   width: 14px;
   margin-right: -7px; /* straddle the seam so the grip is easy to hit */
@@ -1424,7 +1438,7 @@ button.ghost.on {
 }
 .drawer {
   position: absolute;
-  top: 52px;
+  top: var(--topbar-h, 52px);
   right: 16px;
   width: 300px;
   max-height: 60vh;

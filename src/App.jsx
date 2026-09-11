@@ -255,6 +255,7 @@ export default function App() {
   // real children).
   const [spunUp, setSpunUp] = useState(() => new Set());
   const inputRef = useRef(null);
+  const topbarRef = useRef(null); // measured so overlays can sit below a wrapped bar
   const replyRef = useRef(null); // inspector's composer, focused for a new conversation
   const inspectorRef = useRef(null);
   const currentRef = useRef(null); // the selected exchange in the thread
@@ -1349,9 +1350,23 @@ export default function App() {
 
   const empty = nodes.length === 0 && pendings.length === 0;
 
+  // The topbar wraps to more rows on a narrow screen, so its height isn't fixed.
+  // Publish the live height as --topbar-h; the absolute overlays (inspector,
+  // drawer) sit below it instead of a hardcoded 52px.
+  useEffect(() => {
+    const bar = topbarRef.current;
+    if (!bar) return;
+    const apply = () =>
+      bar.parentElement?.style.setProperty("--topbar-h", `${bar.offsetHeight}px`);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(bar);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <div className="app">
-      <header className="topbar">
+      <header className="topbar" ref={topbarRef}>
         <div className="brand">🌳 Canopy</div>
         <div className="hint">
           {empty ? "Seed a root to grow the tree" : "Select a node, then fork from it"}
