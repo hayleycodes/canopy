@@ -1041,6 +1041,9 @@ button.ghost:hover {
 }
 button.stopBtn {
   background: #C4405A;
+  /* Keep stop right-aligned even when it's the only control (auto mode hides
+     the "approve the rest" button). */
+  margin-left: auto;
 }
 button.stopBtn:hover {
   background: #D65772;

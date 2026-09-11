@@ -1680,7 +1680,10 @@ export default function App() {
             <div className="resumeControls">
               {selected?.streaming ? (
                 <>
-                  {selected.auto ? (
+                  {/* When the conversation is already in auto mode, everything is
+                      approved without asking — the per-turn toggle doesn't apply,
+                      so don't offer to "approve the rest". */}
+                  {selected.mode === "auto" ? null : selected.auto ? (
                     <button
                       className="ghost autoOn"
                       onClick={() => setAuto(selected.id, selected.turnId, false)}
