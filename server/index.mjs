@@ -96,6 +96,10 @@ const queuedTurns = new Map(); // turnId -> { prompt, parentId, mode }
 // we raise a prompt to the human; a pending entry is the promise the MCP gate is
 // blocked on until they click. Both are keyed so answers route back correctly.
 const activeTurns = new Map(); // turnId    -> SSE `send` fn
+// How to stop a live turn: aborts the CLI child but lets handleStream persist
+// whatever streamed so far. Keyed by turnId so /api/turn/stop routes to the right
+// one. Set when the stream starts, removed when it ends.
+const turnAborts = new Map(); // turnId    -> () => void (abort this turn)
 const pendingPerms = new Map(); // requestId -> { resolve, input, turnId, tool_name }
 // Ordered display segments accumulated during a turn: turnId -> [{type,...}].
 // Text tokens append here as they stream; an answered AskUserQuestion pushes a
@@ -226,7 +230,10 @@ async function handleStream(req, res, url) {
 
   // If the browser goes away mid-turn, abort the turn (kills the CLI child so it
   // isn't orphaned) and deny anything still waiting on a permission decision.
+  // Stopping via /api/turn/stop aborts the same way, but keeps the stream open so
+  // the partial node (persisted below) can still be delivered.
   const ac = new AbortController();
+  turnAborts.set(turnId, () => ac.abort());
   req.on("close", () => {
     ac.abort();
     activeTurns.delete(turnId);
@@ -239,28 +246,32 @@ async function handleStream(req, res, url) {
     }
   });
 
+  // The CLI's terminal `result` event carries only the LAST assistant message,
+  // but a turn with tool calls emits several text blocks (narrate, call a tool,
+  // narrate again). We stream all of them, so accumulate exactly what we sent
+  // and store that — otherwise the node loses everything but its final block the
+  // instant the turn lands (store.mjs joins the same way when reading from disk).
+  let streamed = "";
+  // The final text block on its own — reset whenever a new text block starts, so
+  // it ends up holding only the last one. Split detection uses this (see graph's
+  // addNode) so a review's findings are parsed from the answer, not the narration.
+  let finalBlock = "";
+  // The turn as ordered segments, so an AskUserQuestion answered mid-turn shows
+  // inline where it happened rather than at the end. Text tokens append to the
+  // current text segment; handlePermissionAnswer pushes a {questions} segment
+  // (see turnSegments), which makes the next token start a fresh text segment.
+  const segments = [];
+  turnSegments.set(turnId, segments);
+  // The session id the CLI stamps on its first event. Kept out here (not just in
+  // the stream callback) so the abort path below can persist the partial turn
+  // under the same id the client already recorded via the `session` event.
+  let sessionId = null;
   try {
     // Claude emits several separate text blocks across a turn (it writes, calls a
     // tool or thinks, writes again). Their deltas would otherwise concatenate with
     // no gap ("…then build.Now I'll…"), so when a fresh text block starts after
     // we've already streamed some text, insert a blank line between them.
     let emittedText = false;
-    // The CLI's terminal `result` event carries only the LAST assistant message,
-    // but a turn with tool calls emits several text blocks (narrate, call a tool,
-    // narrate again). We stream all of them, so accumulate exactly what we sent
-    // and store that — otherwise the node loses everything but its final block the
-    // instant the turn lands (store.mjs joins the same way when reading from disk).
-    let streamed = "";
-    // The final text block on its own — reset whenever a new text block starts, so
-    // it ends up holding only the last one. Split detection uses this (see graph's
-    // addNode) so a review's findings are parsed from the answer, not the narration.
-    let finalBlock = "";
-    // The turn as ordered segments, so an AskUserQuestion answered mid-turn shows
-    // inline where it happened rather than at the end. Text tokens append to the
-    // current text segment; handlePermissionAnswer pushes a {questions} segment
-    // (see turnSegments), which makes the next token start a fresh text segment.
-    const segments = [];
-    turnSegments.set(turnId, segments);
     // The CLI stamps a session_id the instant the turn starts, and writes its
     // transcript to disk under that id AS IT STREAMS. So any /api/graph fetch that
     // lands mid-turn (a second turn finishing, a pin/archive) already reads this
@@ -290,6 +301,7 @@ async function handleStream(req, res, url) {
       (evt) => {
         if (!sentSession && evt.session_id) {
           sentSession = true;
+          sessionId = evt.session_id;
           send("session", { sessionId: evt.session_id });
         }
         const inner = evt.type === "stream_event" ? evt.event : evt;
@@ -331,14 +343,47 @@ async function handleStream(req, res, url) {
     if (parentId) recordLink(workspace, final.session_id, parentId);
     send("node", node);
   } catch (e) {
-    send("error", { message: e.message });
+    // The turn was stopped (the human clicked ■, or the browser went away): the
+    // CLI child was SIGTERM'd mid-stream, so runStream rejected with no `result`
+    // event. Everything it streamed lived only in memory here — the CLI writes a
+    // message to its transcript only once complete, so a reply killed mid-block
+    // is nowhere on disk. Persist what we accumulated as a node so it survives
+    // (in-memory graph → next /api/graph), and push it over the still-open stream
+    // so a live stop swaps the pending for the partial instead of losing it.
+    // A turn stopped before it even emitted a session id has nothing to keep.
+    if (ac.signal.aborted && sessionId) {
+      const hadQuestions = segments.some((x) => x.type === "questions");
+      const node = addNode(workspace, {
+        sessionId,
+        parentId,
+        prompt,
+        result: streamed,
+        finalResult: finalBlock || streamed,
+        segments: hadQuestions ? segments : undefined,
+      });
+      if (parentId) recordLink(workspace, sessionId, parentId);
+      send("node", node);
+    } else {
+      send("error", { message: e.message });
+    }
   } finally {
     activeTurns.delete(turnId);
+    turnAborts.delete(turnId);
     autoApproveTurns.delete(turnId);
     turnSegments.delete(turnId);
     cleanupTurnImages(turnId);
     res.end();
   }
+}
+
+// POST /api/turn/stop — stop a live turn. Aborts its CLI child but leaves the SSE
+// stream open, so handleStream's abort path can persist whatever streamed so far
+// and deliver it as the turn's node. Idempotent: an unknown/already-ended turn is
+// a no-op.
+async function handleStopTurn(req, res) {
+  const { turnId } = await readBody(req);
+  turnAborts.get(turnId)?.();
+  sendJson(res, 200, { ok: true });
 }
 
 // POST /api/permission/ask — the MCP gate calls this for each tool decision. We
@@ -496,8 +541,23 @@ async function route(req, res) {
     // .jsonl hasn't flushed to disk yet.
     const archived = loadArchived(workspace);
     const disk = loadWorkspaceGraph(workspace, MAX_TREES, loadLinks(workspace), loadPins(workspace), archived);
-    const have = new Set(disk.nodes.map((n) => n.id));
-    let extra = snapshot(workspace).nodes.filter((n) => !have.has(n.id));
+    const mem = snapshot(workspace).nodes;
+    // A stopped turn is the one case disk isn't authoritative for: the CLI writes a
+    // message to its transcript only once complete, so a reply killed mid-block is
+    // never on disk — its disk node comes back with the prompt but an empty reply.
+    // The in-memory copy holds what actually streamed, so overlay it onto a matching
+    // disk node whenever disk has no reply but memory does. (A completed turn's disk
+    // node already has its reply, so this leaves it untouched.)
+    const memById = new Map(mem.map((n) => [n.id, n]));
+    const diskNodes = disk.nodes.map((n) => {
+      const m = memById.get(n.id);
+      if (m && !n.result && m.result) {
+        return { ...n, result: m.result, finalResult: m.finalResult, segments: m.segments, tokens: m.tokens ?? n.tokens };
+      }
+      return n;
+    });
+    const have = new Set(diskNodes.map((n) => n.id));
+    let extra = mem.filter((n) => !have.has(n.id));
     // The disk view already pulled archived trees off the canvas, but a
     // just-created tree still lingers in the in-memory snapshot — and since the
     // archive dropped it from `have`, it counts as `extra` and would be re-added.
@@ -511,7 +571,7 @@ async function route(req, res) {
     extra = extra.filter((n) => !archived.has(rootIdOf(n)));
     // Disk roots already carry a summary header; attachSummaries backfills one for
     // any in-memory `extra` root so its column isn't left heading-less.
-    const nodes = attachSummaries([...disk.nodes, ...extra]);
+    const nodes = attachSummaries([...diskNodes, ...extra]);
     const edges = nodes
       .filter((n) => n.parentId)
       .map((n) => ({ id: `${n.parentId}->${n.id}`, source: n.parentId, target: n.id }));
@@ -522,6 +582,9 @@ async function route(req, res) {
   }
   if (req.method === "GET" && url.pathname === "/api/stream") {
     return handleStream(req, res, url);
+  }
+  if (req.method === "POST" && url.pathname === "/api/turn/stop") {
+    return handleStopTurn(req, res);
   }
   if (req.method === "POST" && url.pathname === "/api/reset") {
     const { workspace: rawWs } = await readBody(req);

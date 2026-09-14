@@ -110,6 +110,18 @@ export function runTurn({ prompt, parentId = null, mode = "default", images = []
   };
 }
 
+// Stop a live turn by its server turnId. The server aborts the CLI child but
+// keeps the stream open, persists whatever streamed so far as the turn's node,
+// and delivers it over the stream's `node` event — so the pending swaps to the
+// partial reply instead of the output vanishing.
+export async function stopTurn(turnId) {
+  await fetch("/api/turn/stop", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ turnId }),
+  });
+}
+
 // Answer a permission prompt the server raised. behavior: "allow" | "deny".
 // updatedInput (optional) overrides the tool input on allow — used by
 // AskUserQuestion to feed the human's picks back as the tool's answers.

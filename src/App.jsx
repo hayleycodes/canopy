@@ -12,7 +12,7 @@ import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.js
 import { layoutTree } from "./layout.js";
 import { parseErrorPaste } from "./errorPaste.js";
 import { findingItems, looksLikeReview, fanoutItems } from "./findings.js";
-import { answerPermission, fetchConfig, fetchGraph, getWorkspace, openWorkspace, resetGraph, runTurn, setArchive, setPin, setTurnAuto } from "./api.js";
+import { answerPermission, fetchConfig, fetchGraph, getWorkspace, openWorkspace, resetGraph, runTurn, setArchive, setPin, setTurnAuto, stopTurn as stopTurnApi } from "./api.js";
 
 const nodeTypes = { canopy: NodeCard };
 
@@ -787,6 +787,7 @@ export default function App() {
         perms: p.perms,
         segments: p.segments,
         turnId: p.turnId,
+        sessionId: p.sessionId,
         auto: p.auto,
         images: p.images,
         mode: p.mode,
@@ -1296,20 +1297,27 @@ export default function App() {
     [startTurn, prompt, composerImages, promptKey, clearDraft]
   );
 
-  // Stop an in-flight turn: abort it (closes the stream, SIGTERMs the CLI child
-  // server-side), drop the pending node, and fall selection back to the branch
-  // it forked from — or deselect if it was a seeded root with no parent.
-  const stopTurn = useCallback((tempId, parentId) => {
+  // Stop an in-flight turn. Once it has started streaming (has a server turnId),
+  // ask the server to stop: it SIGTERMs the CLI child but keeps the stream open,
+  // persists whatever streamed so far as the turn's node, and sends it back — so
+  // onNode swaps the pending for the partial reply instead of it vanishing. (The
+  // CLI writes a message to disk only once complete, so a reply killed mid-block
+  // is nowhere on disk; keeping the streamed text is the only way not to lose it.)
+  // Leave the pending in place; onNode/onError clears it when the server responds.
+  //
+  // Before the CLI has stamped a session id nothing has been generated (and the
+  // server has nothing to persist), so just abort locally: drop the pending and
+  // fall selection back to the fork parent (or deselect a seeded root).
+  const stopTurn = useCallback((tempId, parentId, turnId, sessionId) => {
+    if (turnId && sessionId) {
+      stopTurnApi(turnId).catch(() => {});
+      return;
+    }
     aborters.current.get(tempId)?.();
     aborters.current.delete(tempId);
     setSelectedId((cur) => (cur === tempId ? parentId : cur));
     setPendings((ps) => ps.filter((p) => p.tempId !== tempId));
-    // The CLI has usually already written most of this turn to disk by the time
-    // we kill it, so pull the graph again: a stopped turn then reappears with
-    // whatever it persisted (parented under its fork target) instead of vanishing
-    // until the next reload or completed turn.
-    refresh().catch(() => {});
-  }, [refresh]);
+  }, []);
 
   // Switch a live turn to auto-approve so it stops prompting for permissions —
   // the escape hatch when you started a turn in manual mode by accident.
@@ -1738,7 +1746,7 @@ export default function App() {
                   )}
                   <button
                     className="stopBtn"
-                    onClick={() => stopTurn(selected.id, selected.parentId)}
+                    onClick={() => stopTurn(selected.id, selected.parentId, selected.turnId, selected.sessionId)}
                   >
                     ■ stop
                   </button>
