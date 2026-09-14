@@ -737,13 +737,26 @@ export default function App() {
       });
       cardByKey.set(reviewId, m);
     }
-    const list = nodes.map((n) => {
-      const m = n.parentId && cardByKey.get(n.parentId);
-      if (!m) return n;
-      const tag = n.prompt?.match(FINDING_REPLY_RE)?.[1]?.trim();
-      const cardId = tag && m.get(tag);
-      return cardId ? { ...n, parentId: cardId } : n;
-    });
+    // A turn's transcript is on disk (and so in `nodes`) the moment it starts
+    // streaming, under the session id its pending recorded via onSession. While the
+    // pending is still live it IS the view of that turn — the streaming card with
+    // the running token buffer — so drop the disk copy and, for a root turn, its
+    // synthetic summary header. Without this the disk node lands as a second tree
+    // beside the pending whenever a concurrent fetch pulls the graph mid-stream.
+    const streamingSessionIds = new Set(pendings.map((p) => p.sessionId).filter(Boolean));
+    const list = nodes
+      .filter((n) => {
+        if (streamingSessionIds.has(n.id)) return false;
+        if (n.kind === "summary" && streamingSessionIds.has(n.rootId)) return false;
+        return true;
+      })
+      .map((n) => {
+        const m = n.parentId && cardByKey.get(n.parentId);
+        if (!m) return n;
+        const tag = n.prompt?.match(FINDING_REPLY_RE)?.[1]?.trim();
+        const cardId = tag && m.get(tag);
+        return cardId ? { ...n, parentId: cardId } : n;
+      });
     for (const p of pendings) {
       // A fresh root (no parent) has no persisted session yet, so the server
       // hasn't built its summary header. Synthesize one now from the opening
@@ -1142,6 +1155,12 @@ export default function App() {
         { prompt: text, parentId, mode: turnMode, images, workspace },
         {
           onStart: (turnId) => patchPending(tempId, (p) => ({ ...p, turnId })),
+          // The CLI's session id, handed over the instant the turn starts. Record
+          // it so allNodes can suppress the half-written disk node a concurrent
+          // /api/graph fetch reads back for this still-streaming turn — otherwise
+          // it draws as a second tree beside this pending (same id, different from
+          // tempId), which vanishes only when the pending clears in onNode.
+          onSession: (sessionId) => patchPending(tempId, (p) => ({ ...p, sessionId })),
           // Buffered and flushed once per frame (see pushToken/flushTokens).
           onToken: (t) => pushToken(tempId, t),
           onPermission: (req) =>
