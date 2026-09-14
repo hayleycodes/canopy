@@ -261,6 +261,15 @@ async function handleStream(req, res, url) {
     // (see turnSegments), which makes the next token start a fresh text segment.
     const segments = [];
     turnSegments.set(turnId, segments);
+    // The CLI stamps a session_id the instant the turn starts, and writes its
+    // transcript to disk under that id AS IT STREAMS. So any /api/graph fetch that
+    // lands mid-turn (a second turn finishing, a pin/archive) already reads this
+    // turn's half-written session back as a real node — a duplicate of the client's
+    // pending placeholder, which is keyed by a client-only tempId the server never
+    // sees. Hand the client the session_id up front so it can match the two and
+    // suppress the disk copy while its pending is still live. Sent once, on the
+    // first event carrying it (the `system`/`init` event).
+    let sentSession = false;
     const pushText = (t) => {
       const last = segments[segments.length - 1];
       if (last && last.type === "text") last.text += t;
@@ -279,6 +288,10 @@ async function handleStream(req, res, url) {
       cliPrompt,
       { parentId, mode, turnId, port: PORT, cwd: workspace, signal: ac.signal },
       (evt) => {
+        if (!sentSession && evt.session_id) {
+          sentSession = true;
+          send("session", { sessionId: evt.session_id });
+        }
         const inner = evt.type === "stream_event" ? evt.event : evt;
         if (
           inner?.type === "content_block_start" &&

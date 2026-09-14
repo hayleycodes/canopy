@@ -58,9 +58,10 @@ export async function resetGraph(workspace) {
 // POSTed to register the turn (so long prompts don't hit URL limits); we then
 // open an EventSource on the returned turnId.
 // Callbacks: onToken(text) as tokens arrive, onNode(node) when the turn lands,
-// onError(msg). Returns a function that aborts the turn — safe to call before the
-// stream has even opened.
-export function runTurn({ prompt, parentId = null, mode = "default", images = [], workspace }, { onToken, onNode, onError, onPermission, onStart }) {
+// onError(msg), onSession(sessionId) once the CLI stamps this turn's session id.
+// Returns a function that aborts the turn — safe to call before the stream has
+// even opened.
+export function runTurn({ prompt, parentId = null, mode = "default", images = [], workspace }, { onToken, onNode, onError, onPermission, onStart, onSession }) {
   let es = null;
   let aborted = false;
 
@@ -88,6 +89,7 @@ export function runTurn({ prompt, parentId = null, mode = "default", images = []
 
     es = new EventSource(`/api/stream?turnId=${encodeURIComponent(turnId)}`);
     es.addEventListener("token", (e) => onToken?.(JSON.parse(e.data).text));
+    es.addEventListener("session", (e) => onSession?.(JSON.parse(e.data).sessionId));
     es.addEventListener("permission", (e) => onPermission?.(JSON.parse(e.data)));
     es.addEventListener("node", (e) => {
       onNode?.(JSON.parse(e.data));
