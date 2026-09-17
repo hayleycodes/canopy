@@ -1229,6 +1229,10 @@ button.stopBtn:hover {
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.12s;
+  /* The button's "copy" text sits inside the code block; keep it out of a
+     native highlight-and-copy selection. */
+  -webkit-user-select: none;
+  user-select: none;
 }
 .md pre:hover .copyBtn,
 .copyBtn:focus-visible {
@@ -1273,6 +1277,8 @@ button.stopBtn:hover {
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.12s;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .md pre code .codeLine:hover .lineCopyBtn,
 .lineCopyBtn:focus-visible {
