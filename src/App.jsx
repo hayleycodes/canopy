@@ -544,16 +544,21 @@ export default function App() {
     [refresh, rootOf, selectedId, workspace]
   );
 
-  // Archive every tree currently on the canvas in one go, for a clean slate.
-  // Non-destructive: each stays on disk and moves to the drawer (the "archived"
-  // count jumps to the full total), so any of them can be brought back.
+  // Archive every conversation in one go, for a clean slate. Non-destructive:
+  // each stays on disk and moves to the drawer, so any can be brought back.
+  // Sweeps up BOTH the trees on the canvas AND the ones that have merely aged out
+  // past the recency limit (they sit un-archived in the drawer). Missing the
+  // aged-out ones would let one pop back onto the canvas as soon as the recency
+  // window shifts — e.g. when the next new conversation starts.
   const archiveAll = useCallback(async () => {
-    const rootIds = [...new Set(nodes.filter((n) => n.kind === "summary" && n.rootId).map((n) => n.rootId))];
+    const canvasRoots = nodes.filter((n) => n.kind === "summary" && n.rootId).map((n) => n.rootId);
+    const agedOut = archivedList.filter((a) => !a.archived).map((a) => a.rootId);
+    const rootIds = [...new Set([...canvasRoots, ...agedOut])];
     if (rootIds.length === 0) return;
     await Promise.all(rootIds.map((id) => setArchive(id, true, workspace)));
     setSelectedId(null);
     await refresh();
-  }, [nodes, refresh, workspace]);
+  }, [nodes, archivedList, refresh, workspace]);
 
   // Boot: learn the server default + recent repos, and — for a tab that opened
   // with no ?ws= — pin it to the default and write that into the URL so the tab
@@ -1387,6 +1392,10 @@ export default function App() {
 
 
   const empty = nodes.length === 0 && pendings.length === 0;
+  // Anything left to archive — an on-canvas tree, or one merely aged out into the
+  // drawer (already-archived drawer entries don't count).
+  const canArchiveAll =
+    nodes.some((n) => n.kind === "summary") || archivedList.some((a) => !a.archived);
 
   // The topbar wraps to more rows on a narrow screen, so its height isn't fixed.
   // Publish the live height as --topbar-h; the absolute overlays (inspector,
@@ -1432,7 +1441,7 @@ export default function App() {
         <button className="ghost" onClick={onTidy} disabled={empty} title="Re-pack the trees so they stop overlapping">
           🧹 tidy
         </button>
-        <button className="ghost" onClick={archiveAll} disabled={empty} title="Archive every tree on the canvas — a clean slate you can restore from the drawer">
+        <button className="ghost" onClick={archiveAll} disabled={!canArchiveAll} title="Archive every conversation — a clean slate you can restore from the drawer">
           📦 archive all
         </button>
         {archivedList.length > 0 && (
