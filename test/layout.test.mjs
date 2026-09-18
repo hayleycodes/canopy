@@ -49,6 +49,42 @@ test("a pending child (order Infinity) lands rightmost", () => {
   assert.equal(pos.get("pending").x, 520);
 });
 
+test("trees pack left-to-right by creation order regardless of array order", () => {
+  // `old` has the lowest order but is listed last; it should still sit leftmost.
+  const pos = layoutTree([
+    { id: "new1", parentId: null, order: 5 },
+    { id: "new2", parentId: null, order: 9 },
+    { id: "old", parentId: null, order: 1 },
+  ]);
+  // Separate trees sit a column plus the half-column TREE_GAP apart (1.5 * 260).
+  assert.equal(pos.get("old").x, 0);
+  assert.equal(pos.get("new1").x, 390);
+  assert.equal(pos.get("new2").x, 780);
+});
+
+test("a reused slots map is repacked, so archiving a tree closes the gap", () => {
+  const slots = new Map();
+  layoutTree(
+    [
+      { id: "a", parentId: null, order: 1 },
+      { id: "b", parentId: null, order: 2 },
+      { id: "c", parentId: null, order: 3 },
+    ],
+    slots,
+  );
+  // Archive the middle tree: `b` is gone, so `c` slides left into its column
+  // rather than leaving a hole where `b` was.
+  const pos = layoutTree(
+    [
+      { id: "a", parentId: null, order: 1 },
+      { id: "c", parentId: null, order: 3 },
+    ],
+    slots,
+  );
+  assert.equal(pos.get("a").x, 0);
+  assert.equal(pos.get("c").x, 390);
+});
+
 test("a node whose parent is absent is treated as its own root", () => {
   const pos = layoutTree([{ id: "orphan", parentId: "missing" }]);
   assert.deepEqual(pos.get("orphan"), { x: 0, y: 0 });

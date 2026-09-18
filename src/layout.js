@@ -2,22 +2,24 @@
 // server, assign each node an {x, y}: trees sit side by side (horizontal), each
 // top-aligned, with children dropping one level per depth.
 //
-// Each tree is laid out INDEPENDENTLY and then dropped into a fixed horizontal
-// slot it keeps across renders (via the caller-supplied `slots` cache). This is
-// deliberate: an earlier version walked every tree with one shared left-to-right
-// cursor, so adding a node anywhere reflowed the whole row — trees slid sideways
-// under the camera and appeared to vanish. Now a tree's slot is assigned once and
-// never shifts when another tree changes; forking only reflows that one tree
-// within its own slot.
+// Each tree is laid out INDEPENDENTLY and then packed into a horizontal slot in
+// creation order (oldest tree leftmost). The slots are recomputed from scratch on
+// every layout, so the row always reads oldest→newest and archiving a tree lets
+// the rest close the gap it left — a tree's column follows from its age, never
+// from when it first appeared this session. (An earlier version pinned each slot
+// on first sight and only appended new trees to the right; that kept forking from
+// nudging neighbours, but it stranded an older tree wherever it happened to
+// re-enter the canvas mid-session, out of age order.)
 
 const H_GAP = 260; // horizontal spacing between sibling columns
 const V_GAP = 50; // vertical gap between a card's bottom and its child's top
 const DEFAULT_H = 100; // assumed card height before React Flow has measured it
 const TREE_GAP = 0.5; // gap between trees, in column units
 
-// `slots` (rootId -> base column) is a persistent map the caller keeps across
-// renders so each tree keeps its horizontal position. The default fresh Map makes
-// this a stateless one-off layout (used by tests).
+// `slots` (rootId -> base column) is rebuilt from scratch on every call and left
+// populated for callers that want to inspect the final packing; positions no
+// longer depend on what it held coming in. A default fresh Map keeps the tests as
+// simple one-off layouts.
 // `heights` (id -> measured pixel height) lets each child clear its actual
 // parent instead of a fixed row height, so tall cards no longer overlap the
 // row below. Unmeasured nodes fall back to DEFAULT_H (which keeps the simple
@@ -80,20 +82,14 @@ export function layoutTree(nodes, slots = new Map(), heights = new Map()) {
     width.set(root, Math.max(cursor, 1));
   }
 
-  // Forget slots for trees that no longer exist so the cache can't grow forever.
-  for (const key of [...slots.keys()]) if (!width.has(key)) slots.delete(key);
-
-  // Rightmost column already claimed by a slotted tree.
-  let rightEdge = 0;
-  for (const [id, base] of slots) rightEdge = Math.max(rightEdge, base + width.get(id));
-
-  // Give any tree without a slot yet (new trees) one to the right of everything
-  // already placed. Existing trees keep the slot they had.
+  // Pack the trees left-to-right in creation order (`roots` is already sorted by
+  // `order`). Rebuilding from scratch each layout is what keeps the row in age
+  // order and closes the gap when a tree is archived.
+  slots.clear();
+  let edge = 0;
   for (const root of roots) {
-    if (slots.has(root)) continue;
-    const base = slots.size === 0 ? 0 : rightEdge + TREE_GAP;
-    slots.set(root, base);
-    rightEdge = base + width.get(root);
+    slots.set(root, edge);
+    edge += width.get(root) + TREE_GAP;
   }
 
   // Compose absolute positions from each node's local column + its tree's slot.
