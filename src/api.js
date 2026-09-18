@@ -154,6 +154,16 @@ export async function setArchive(rootId, archived, workspace) {
   });
 }
 
+// Archive/unarchive many trees in one atomic request. Sending one request per
+// tree instead races on the server's archived-set file and loses most of them.
+export async function setArchiveMany(rootIds, archived, workspace) {
+  await fetch("/api/archive", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ rootIds, archived, workspace }),
+  });
+}
+
 // Switch a live turn to auto-approve: from now on the server allows every
 // permission request for this turn (and any already waiting) without asking.
 export async function setTurnAuto(turnId, enabled) {

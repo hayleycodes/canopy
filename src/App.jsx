@@ -12,7 +12,7 @@ import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.js
 import { layoutTree } from "./layout.js";
 import { parseErrorPaste } from "./errorPaste.js";
 import { findingItems, looksLikeReview, fanoutItems } from "./findings.js";
-import { answerPermission, fetchConfig, fetchGraph, getWorkspace, openWorkspace, resetGraph, runTurn, setArchive, setPin, setTurnAuto, stopTurn as stopTurnApi } from "./api.js";
+import { answerPermission, fetchConfig, fetchGraph, getWorkspace, openWorkspace, resetGraph, runTurn, setArchive, setArchiveMany, setPin, setTurnAuto, stopTurn as stopTurnApi } from "./api.js";
 
 const nodeTypes = { canopy: NodeCard };
 
@@ -555,7 +555,9 @@ export default function App() {
     const agedOut = archivedList.filter((a) => !a.archived).map((a) => a.rootId);
     const rootIds = [...new Set([...canvasRoots, ...agedOut])];
     if (rootIds.length === 0) return;
-    await Promise.all(rootIds.map((id) => setArchive(id, true, workspace)));
+    // One atomic request — archiving each in its own request races on the
+    // server's shared archived-set file and loses most of them.
+    await setArchiveMany(rootIds, true, workspace);
     setSelectedId(null);
     await refresh();
   }, [nodes, archivedList, refresh, workspace]);

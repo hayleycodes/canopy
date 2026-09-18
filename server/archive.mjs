@@ -27,12 +27,19 @@ export function loadArchived(workspace) {
   }
 }
 
-// Archive or unarchive a conversation by its root id. Returns the updated set.
+// Archive or unarchive one or more conversations by root id, in a single
+// read-modify-write. Taking an array matters: archiving trees one HTTP request
+// each races on this shared file (every request reloads, adds only its own id,
+// and writes the whole set back), so parallel single archives clobber each other
+// and most are lost. One call, one write, no race.
 export function setArchived(workspace, rootId, archived) {
+  const ids = Array.isArray(rootId) ? rootId : [rootId];
   const set = loadArchived(workspace);
-  if (!rootId) return set;
-  if (archived) set.add(rootId);
-  else set.delete(rootId);
+  for (const id of ids) {
+    if (!id) continue;
+    if (archived) set.add(id);
+    else set.delete(id);
+  }
   try {
     mkdirSync(DIR, { recursive: true });
     writeFileSync(fileFor(workspace), JSON.stringify([...set]));

@@ -468,10 +468,11 @@ async function handlePin(req, res) {
 // archived tree is pulled off the canvas (regardless of recency) but its
 // transcript stays on disk; it's listed in the drawer so it can be brought back.
 async function handleArchive(req, res) {
-  const { rootId, archived, workspace: rawWs } = await readBody(req);
+  const { rootId, rootIds, archived, workspace: rawWs } = await readBody(req);
   const workspace = validWorkspace(rawWs);
   if (!workspace) return sendJson(res, 400, { error: "unknown or missing workspace" });
-  setArchived(workspace, rootId, !!archived);
+  // Accept a single rootId or a batch (rootIds); the batch is one atomic write.
+  setArchived(workspace, Array.isArray(rootIds) ? rootIds : rootId, !!archived);
   sendJson(res, 200, { ok: true });
 }
 
