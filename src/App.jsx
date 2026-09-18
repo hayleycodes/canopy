@@ -544,6 +544,17 @@ export default function App() {
     [refresh, rootOf, selectedId, workspace]
   );
 
+  // Archive every tree currently on the canvas in one go, for a clean slate.
+  // Non-destructive: each stays on disk and moves to the drawer (the "archived"
+  // count jumps to the full total), so any of them can be brought back.
+  const archiveAll = useCallback(async () => {
+    const rootIds = [...new Set(nodes.filter((n) => n.kind === "summary" && n.rootId).map((n) => n.rootId))];
+    if (rootIds.length === 0) return;
+    await Promise.all(rootIds.map((id) => setArchive(id, true, workspace)));
+    setSelectedId(null);
+    await refresh();
+  }, [nodes, refresh, workspace]);
+
   // Boot: learn the server default + recent repos, and — for a tab that opened
   // with no ?ws= — pin it to the default and write that into the URL so the tab
   // is self-describing (and a reload keeps the same repo).
@@ -1420,6 +1431,9 @@ export default function App() {
         <button onClick={newConversation}>＋ new conversation</button>
         <button className="ghost" onClick={onTidy} disabled={empty} title="Re-pack the trees so they stop overlapping">
           🧹 tidy
+        </button>
+        <button className="ghost" onClick={archiveAll} disabled={empty} title="Archive every tree on the canvas — a clean slate you can restore from the drawer">
+          📦 archive all
         </button>
         {archivedList.length > 0 && (
           <button
