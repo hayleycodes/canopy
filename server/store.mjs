@@ -318,7 +318,11 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
   keepRoots.forEach(collect);
   sessions = sessions.filter((s) => keep.has(s.id));
 
-  const byTime = (a, b) => (a.firstTs || "").localeCompare(b.firstTs || "");
+  // Tie-break identical firstTs (fan-out siblings share a start instant) by id, so
+  // the order is deterministic instead of following whatever order readdir returned
+  // — otherwise a fan-out's branches can reshuffle between reloads.
+  const byTime = (a, b) =>
+    (a.firstTs || "").localeCompare(b.firstTs || "") || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   sessions.sort(byTime);
 
   const nodes = sessions.map((s, i) => {
