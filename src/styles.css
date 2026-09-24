@@ -1108,6 +1108,20 @@ button.stopBtn:hover {
   align-items: center;
   margin-bottom: 12px;
 }
+.inspectorTitle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.inspectorTitle .archiveBtn {
+  opacity: 0.5;
+}
+.inspectorHead:hover .archiveBtn {
+  opacity: 0.85;
+}
+.inspectorTitle .archiveBtn:hover {
+  opacity: 1;
+}
 .inspector h4 {
   margin: 16px 0 4px;
   font-size: 11px;

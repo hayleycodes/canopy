@@ -1578,9 +1578,20 @@ export default function App() {
             onScroll={onInspectorScroll}
           >
           <div className="inspectorHead">
-            <span className="mono">
-              {selected ? (selected.streaming ? "streaming…" : selected.kind === "finding" ? `finding ${selected.finding.n}` : selected.id.slice(0, 8)) : "new conversation"}
-            </span>
+            <div className="inspectorTitle">
+              <span className="mono">
+                {selected ? (selected.streaming ? "streaming…" : selected.kind === "finding" ? `finding ${selected.finding.n}` : selected.id.slice(0, 8)) : "new conversation"}
+              </span>
+              {selected && (
+                <button
+                  className="archiveBtn"
+                  title="Archive — take this conversation off the canvas without deleting it"
+                  onClick={() => toggleArchive(rootOf(selected.id), true)}
+                >
+                  🗄
+                </button>
+              )}
+            </div>
             <button
               className="ghost"
               onClick={() => {
