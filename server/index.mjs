@@ -570,6 +570,18 @@ async function route(req, res) {
       return cur.id;
     };
     extra = extra.filter((n) => !archived.has(rootIdOf(n)));
+    // Disk `order` is a dense 0..n by creation age; the in-memory graph numbers its
+    // nodes with its own `g.seq` counter, a DIFFERENT scheme that collides with the
+    // disk indices — so a just-finished tree still waiting to flush would sort into
+    // the middle (or far left) of the row until the next refresh reconciles it,
+    // reading as a tree that randomly jumps slots. Extras are unflushed, i.e. the
+    // newest work, so rebase them above the disk max (keeping their relative order)
+    // — the row stays oldest→newest and new trees land on the right where they belong.
+    const maxDiskOrder = diskNodes.reduce((m, n) => Math.max(m, n.order ?? 0), 0);
+    const minExtraOrder = extra.reduce((m, n) => Math.min(m, n.order ?? 0), Infinity);
+    if (extra.length) {
+      extra = extra.map((n) => ({ ...n, order: maxDiskOrder + 1 + ((n.order ?? 0) - minExtraOrder) }));
+    }
     // Disk roots already carry a summary header; attachSummaries backfills one for
     // any in-memory `extra` root so its column isn't left heading-less.
     const nodes = attachSummaries([...diskNodes, ...extra]);
