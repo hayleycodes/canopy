@@ -569,7 +569,19 @@ async function route(req, res) {
       while (cur.parentId && extraById.has(cur.parentId)) cur = extraById.get(cur.parentId);
       return cur.id;
     };
-    extra = extra.filter((n) => !archived.has(rootIdOf(n)));
+    // The walk only sees in-memory nodes, so a branch whose ancestors predate this
+    // server process stops short of the real root. If that topmost node's parent is
+    // on neither disk nor memory, it hangs off an off-canvas (archived or aged-out)
+    // tree — drop it rather than surface the branch as a brand-new tree.
+    // Likewise a root that's on disk but off-canvas (aged out of the recency window
+    // as well as archived) — memory still holds it if it was created this process,
+    // and re-adding it as an "unflushed" extra would jump it to the rightmost slot.
+    const offCanvas = new Set(disk.archived.map((a) => a.rootId));
+    extra = extra.filter((n) => {
+      const top = extraById.get(rootIdOf(n));
+      if (top.parentId && !have.has(top.parentId)) return false;
+      return !archived.has(top.id) && !offCanvas.has(top.id);
+    });
     // Disk `order` is a dense 0..n by creation age; the in-memory graph numbers its
     // nodes with its own `g.seq` counter, a DIFFERENT scheme that collides with the
     // disk indices — so a just-finished tree still waiting to flush would sort into
