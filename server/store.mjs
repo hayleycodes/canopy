@@ -278,8 +278,8 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     }
   }
 
-  // Keep only the `limit` most recently active trees. A tree's activity is the
-  // latest timestamp anywhere in it; children are collected from its root.
+  // Keep only the `limit` most recently started trees (see below). `subtreeMax` —
+  // the latest timestamp anywhere in a tree — still orders the drawer.
   const children = new Map(sessions.map((s) => [s.id, []]));
   for (const s of sessions) if (s.parentId) children.get(s.parentId)?.push(s.id);
   const byId = new Map(sessions.map((s) => [s.id, s]));
@@ -296,8 +296,11 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
   // the recency limit, or explicitly archived — lives only in the drawer.
   let keepRoots;
   if (limit > 0) {
+    // The window is the `limit` most recently STARTED trees — the same key the
+    // canvas orders by. Ranking by latest activity let an aged-out tree pop back
+    // whenever its transcript was touched, landing mid-row by its older start time.
     keepRoots = roots
-      .map((r) => ({ id: r.id, act: subtreeMax(r.id) }))
+      .map((r) => ({ id: r.id, act: r.firstTs || "" }))
       .sort((a, b) => b.act.localeCompare(a.act))
       .slice(0, limit)
       .map((r) => r.id);
