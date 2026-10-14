@@ -139,11 +139,21 @@ export function runStream(prompt, opts = {}, onEvent = () => {}) {
 
     // If the caller aborts (e.g. the browser disconnected), stop the turn so we
     // don't leave an orphaned `claude` process writing a half-finished session.
+    // SIGTERM asks it to wind down; if it's wedged (e.g. blocked mid model-request)
+    // it can sit there for ages, which is the delay a human sees after clicking ■.
+    // So escalate to SIGKILL after a short grace period to end the turn promptly.
     const signal = opts.signal;
+    let killTimer = null;
     const onAbort = () => {
       try {
         child.kill("SIGTERM");
       } catch {}
+      killTimer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {}
+      }, 1500);
+      killTimer.unref?.();
     };
     if (signal) {
       if (signal.aborted) onAbort();
@@ -152,6 +162,7 @@ export function runStream(prompt, opts = {}, onEvent = () => {}) {
 
     const cleanup = () => {
       if (cfgPath) rmSync(cfgPath, { force: true });
+      if (killTimer) clearTimeout(killTimer);
       signal?.removeEventListener("abort", onAbort);
     };
 

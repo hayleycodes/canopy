@@ -14,7 +14,7 @@ function fmtTokens(n) {
 // requests surface here as Allow/Deny. The ⑂ button branches a new child off
 // this node — do it on a node that already has children to split the tree.
 export default function NodeCard({ data, selected }) {
-  const { id, label, result, streaming, perms = [], canFork, onFork, onAnswer, kind, highlighted, ready, errorPaste, tokens, finding, canSplit, split, onSplit, canSpinUp, spinCount, onSpinUp, canMerge, mergeCount, onMerge, isMerge, rootId, pinned, pending, onTogglePin, onToggleArchive } = data;
+  const { id, label, result, streaming, stopping, perms = [], canFork, onFork, onAnswer, kind, highlighted, ready, errorPaste, tokens, finding, canSplit, split, onSplit, canSpinUp, spinCount, onSpinUp, canMerge, mergeCount, onMerge, isMerge, rootId, pinned, pending, onTogglePin, onToggleArchive } = data;
 
   // The file chip on a finding card copies its path on click (see below). A brief
   // "copied" flip gives feedback without stealing the click from the card.
@@ -191,7 +191,7 @@ export default function NodeCard({ data, selected }) {
 
       <div className="nodeResult">
         {result || (streaming ? "" : <span className="muted">no reply yet</span>)}
-        {streaming && <span className="cursor">▋</span>}
+        {streaming && (stopping ? <span className="stoppingNote">stopping…</span> : <span className="cursor">▋</span>)}
       </div>
 
       {perms.map((p) => (

@@ -810,6 +810,7 @@ export default function App() {
         images: p.images,
         mode: p.mode,
         streaming: true,
+        stopping: p.stopping,
         order: Infinity,
       });
     }
@@ -999,6 +1000,7 @@ export default function App() {
         label: isMerge(n) ? mergePromptLabel(n.prompt || "") : n.label,
         result: n.result,
         streaming: !!n.streaming,
+        stopping: !!n.stopping,
         kind: n.kind,
         // Summary headers carry their tree's root id + pin state, so the header
         // can toggle whether this conversation stays on the canvas.
@@ -1328,6 +1330,10 @@ export default function App() {
   // fall selection back to the fork parent (or deselect a seeded root).
   const stopTurn = useCallback((tempId, parentId, turnId, sessionId) => {
     if (turnId && sessionId) {
+      // The server takes a moment to wind down the CLI child and send back the
+      // partial reply, so flag the pending as stopping right away — the card and
+      // composer show "stopping…" instead of leaving the turn looking live.
+      patchPending(tempId, (p) => ({ ...p, stopping: true }));
       stopTurnApi(turnId).catch(() => {});
       return;
     }
@@ -1335,7 +1341,7 @@ export default function App() {
     aborters.current.delete(tempId);
     setSelectedId((cur) => (cur === tempId ? parentId : cur));
     setPendings((ps) => ps.filter((p) => p.tempId !== tempId));
-  }, []);
+  }, [patchPending]);
 
   // Switch a live turn to auto-approve so it stops prompting for permissions —
   // the escape hatch when you started a turn in manual mode by accident.
@@ -1651,6 +1657,13 @@ export default function App() {
                   // Once a turn is flipped to "approve the rest", it's running in
                   // auto — reflect that on the badge instead of its starting mode.
                   const m = n.streaming ? MODES.find((mo) => mo.value === (n.auto ? "auto" : n.mode)) : null;
+                  // While a stop is in flight the turn is winding down, not live —
+                  // show "stopping…" in place of the blinking cursor.
+                  const liveCursor = n.stopping ? (
+                    <span className="stoppingNote">stopping…</span>
+                  ) : (
+                    <span className="cursor">▋</span>
+                  );
                   return (
                     <div className={`assistantBlock${m ? " tagged" : ""}`}>
                       {m && (
@@ -1667,7 +1680,7 @@ export default function App() {
                             ) : (
                               <div className="msg assistant" key={i}>
                                 <Markdown>{seg.text}</Markdown>
-                                {n.streaming && i === n.segments.length - 1 && <span className="cursor">▋</span>}
+                                {n.streaming && i === n.segments.length - 1 && liveCursor}
                               </div>
                             )
                           )}
@@ -1675,7 +1688,7 @@ export default function App() {
                               cursor below the Q&A so the turn still reads as in-progress. */}
                           {n.streaming && n.segments[n.segments.length - 1]?.type === "questions" && (
                             <div className="msg assistant">
-                              <span className="cursor">▋</span>
+                              {liveCursor}
                             </div>
                           )}
                         </>
@@ -1686,7 +1699,7 @@ export default function App() {
                           ) : (
                             !n.streaming && <span className="muted">—</span>
                           )}
-                          {n.streaming && <span className="cursor">▋</span>}
+                          {n.streaming && liveCursor}
                         </div>
                       )}
                     </div>
@@ -1747,7 +1760,9 @@ export default function App() {
                 !selected
                   ? "Ask anything to start a new conversation…"
                   : selected.streaming
-                    ? "Streaming… reply once it finishes"
+                    ? selected.stopping
+                      ? "Stopping…"
+                      : "Streaming… reply once it finishes"
                     : selected.kind === "finding"
                       ? "Reply to fork the review and work on this finding…"
                       : "Reply to continue this conversation…"
@@ -1760,8 +1775,9 @@ export default function App() {
                 <>
                   {/* When the conversation is already in auto mode, everything is
                       approved without asking — the per-turn toggle doesn't apply,
-                      so don't offer to "approve the rest". */}
-                  {selected.mode === "auto" ? null : selected.auto ? (
+                      so don't offer to "approve the rest". Once a stop is in flight
+                      the turn is ending, so the permission toggle no longer applies. */}
+                  {selected.stopping || selected.mode === "auto" ? null : selected.auto ? (
                     <button
                       className="ghost autoOn"
                       onClick={() => setAuto(selected.id, selected.turnId, false)}
@@ -1783,8 +1799,9 @@ export default function App() {
                   <button
                     className="stopBtn"
                     onClick={() => stopTurn(selected.id, selected.parentId, selected.turnId, selected.sessionId)}
+                    disabled={selected.stopping}
                   >
-                    ■ stop
+                    {selected.stopping ? "■ stopping…" : "■ stop"}
                   </button>
                 </>
               ) : (

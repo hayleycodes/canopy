@@ -546,6 +546,14 @@ body {
   color: var(--accent);
 }
 
+/* Shown in place of the streaming cursor once a stop is in flight — the turn is
+   winding down while the server kills the CLI child and returns the partial. */
+.stoppingNote {
+  color: #C4405A;
+  font-style: italic;
+  animation: blink 1s steps(2) infinite;
+}
+
 /* the streaming reply, wrapped so a mode badge can hang off its top edge */
 .assistantBlock {
   display: flex;
@@ -1061,6 +1069,11 @@ button.stopBtn {
 }
 button.stopBtn:hover {
   background: #D65772;
+}
+button.stopBtn:disabled {
+  background: #7a3543;
+  cursor: default;
+  opacity: 0.8;
 }
 
 /* inspector */
