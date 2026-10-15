@@ -1446,6 +1446,13 @@ export default function App() {
           </div>
         )}
         <button onClick={newConversation}>＋ new conversation</button>
+        <button
+          className="ghost"
+          onClick={() => startTurn(null, "Look at my PRs and linear cards. what is the state of things?", [])}
+          title="Start a conversation asking for the state of your PRs and Linear cards"
+        >
+          📋 status check
+        </button>
         <button className="ghost" onClick={onTidy} disabled={empty} title="Re-pack the trees so they stop overlapping">
           🧹 tidy
         </button>
