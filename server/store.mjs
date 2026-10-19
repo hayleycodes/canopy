@@ -187,6 +187,20 @@ function parseSession(path, id) {
 // changes the signature and invalidates it.
 let graphCache = null; // { key, result }
 
+// The graph cache misses whenever links/pins/archives change, even though no
+// transcript did — and re-parsing a big repo's transcripts takes seconds. So
+// also cache each parsed session by path, reusing it while its size/mtime hold.
+const sessionCache = new Map(); // path -> { size, mtimeMs, session }
+
+function parseSessionCached(path, id) {
+  const st = statSync(path);
+  const hit = sessionCache.get(path);
+  if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return hit.session;
+  const session = parseSession(path, id);
+  sessionCache.set(path, { size: st.size, mtimeMs: st.mtimeMs, session });
+  return session;
+}
+
 function dirSignature(dir, limit) {
   const parts = readdirSync(dir)
     .filter((f) => f.endsWith(".jsonl"))
@@ -224,7 +238,7 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
   for (const f of readdirSync(dir)) {
     if (!f.endsWith(".jsonl")) continue;
     try {
-      const s = parseSession(join(dir, f), f.slice(0, -6));
+      const s = parseSessionCached(join(dir, f), f.slice(0, -6));
       if (s.msgs.length) sessions.push(s);
     } catch {}
   }
