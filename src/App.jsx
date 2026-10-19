@@ -10,6 +10,7 @@ import PermPrompt, { ResolvedQuestions } from "./PermPrompt.jsx";
 import Markdown from "./Markdown.jsx";
 import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.jsx";
 import { layoutTree } from "./layout.js";
+import { collapseChains } from "./collapse.js";
 import { parseErrorPaste } from "./errorPaste.js";
 import { findingItems, looksLikeReview, fanoutItems } from "./findings.js";
 import { answerPermission, fetchConfig, fetchGraph, getWorkspace, openWorkspace, resetGraph, runTurn, setArchive, setArchiveMany, setPin, setTurnAuto, stopTurn as stopTurnApi } from "./api.js";
@@ -254,6 +255,10 @@ export default function App() {
   // reload naturally leaves them in place with the button gone (its items are now
   // real children).
   const [spunUp, setSpunUp] = useState(() => new Set());
+  // Nodes whose long single-child runs below are folded into "+N turns" cards on
+  // the canvas (see collapse.js). Session state: the node above the run → the ids
+  // it covered when folded.
+  const [collapsedIds, setCollapsedIds] = useState(() => new Map());
   const inputRef = useRef(null);
   const topbarRef = useRef(null); // measured so overlays can sit below a wrapped bar
   const replyRef = useRef(null); // inspector's composer, focused for a new conversation
@@ -920,6 +925,59 @@ export default function App() {
     return { map, isMerge, branchesOf, byId, leafOf, mergeFan };
   }, [allNodes, findingInfo, fanoutInfo, spunUp]);
 
+  // What the canvas actually draws: allNodes with consolidated trees' long runs
+  // folded away. Anything that needs to stay on screen — the selected / streaming
+  // / ready / permission-waiting node, and both ends of a merge's gather edges —
+  // is kept out of the fold.
+  const view = useMemo(() => {
+    const keep = new Set([selectedId, ...readyIds]);
+    const { isMerge, mergeFan } = nodeActions;
+    for (const n of allNodes) {
+      if (n.streaming || n.perms?.length || findingInfo.get(n.id)?.shown) keep.add(n.id);
+      if (!isMerge(n)) continue;
+      keep.add(n.id);
+      for (const leaf of mergeFan(n)?.leaves || []) keep.add(leaf.id);
+    }
+    return collapseChains(allNodes, collapsedIds, keep);
+  }, [allNodes, collapsedIds, selectedId, readyIds, nodeActions, findingInfo]);
+
+  // Fold/unfold the runs below one node (its card's button, or a folded card).
+  // Folding snapshots the turns it covers right now, so later replies don't get
+  // swallowed into the fold.
+  const toggleFold = useCallback(
+    (id) => {
+      setCollapsedIds((prev) => {
+        const next = new Map(prev);
+        if (next.has(id)) next.delete(id);
+        else if (view.anchors.has(id)) next.set(id, new Set(view.anchors.get(id).ids));
+        return next;
+      });
+    },
+    [view]
+  );
+
+  // The header's fold-everything toggle: if anything in the tree is folded,
+  // unfold it all; otherwise fold from every top-level anchor.
+  const treeFolded = useCallback(
+    (rootId) => [...collapsedIds.keys()].some((id) => view.anchors.get(id)?.rootId === rootId),
+    [collapsedIds, view]
+  );
+  const toggleTreeFold = useCallback(
+    (rootId) => {
+      const unfold = treeFolded(rootId);
+      setCollapsedIds((prev) => {
+        const next = new Map(prev);
+        for (const [id, a] of view.anchors) {
+          if (a.rootId !== rootId) continue;
+          if (unfold) next.delete(id);
+          else if (a.top) next.set(id, new Set(a.ids));
+        }
+        return next;
+      });
+    },
+    [treeFolded, view]
+  );
+
   // Persistent per-tree horizontal slots, so a tree keeps its x position across
   // renders and forking one tree never shifts another.
   const treeSlots = useRef(new Map());
@@ -929,20 +987,21 @@ export default function App() {
   // Positions only depend on the tree shape, so keep the (relatively expensive)
   // layout out of the render path that reacts to selection/highlight changes.
   const layout = useMemo(() => {
-    const pos = layoutTree(allNodes, treeSlots.current, dims);
+    const viewNodes = view.nodes;
+    const pos = layoutTree(viewNodes, treeSlots.current, dims);
     // A merge forks from the middle branch (see mergeBranches), so the tree layout
     // drops it inline with the OTHER branches' children — same row as its cousins.
     // Push it (and any subtree it grew) a row below the whole fan it gathers from,
     // so it visibly sits under the convergence rather than beside it.
     const { isMerge, mergeFan } = nodeActions;
     const kids = new Map();
-    for (const n of allNodes) {
+    for (const n of viewNodes) {
       if (!n.parentId) continue;
       if (!kids.has(n.parentId)) kids.set(n.parentId, []);
       kids.get(n.parentId).push(n.id);
     }
     const heightOf = (id) => dims.get(id)?.height || 100;
-    for (const n of allNodes) {
+    for (const n of viewNodes) {
       if (!isMerge(n) || !n.parentId) continue;
       const fan = mergeFan(n);
       if (!fan) continue;
@@ -968,9 +1027,9 @@ export default function App() {
     }
     // Which nodes already have a child — the ⑂ button only makes sense there,
     // where it splits off a sibling branch. A leaf is continued via the composer.
-    const hasChild = new Set(allNodes.map((n) => n.parentId).filter(Boolean));
+    const hasChild = new Set(viewNodes.map((n) => n.parentId).filter(Boolean));
     return { pos, hasChild };
-  }, [allNodes, dims, tidyNonce, nodeActions]);
+  }, [view, dims, tidyNonce, nodeActions]);
 
   // Tidy the forest: trees keep a slot assigned once and never re-packed, so a
   // tree that grows wider than its original slot ends up overlapping its
@@ -986,7 +1045,7 @@ export default function App() {
   const { rfNodes, rfEdges } = useMemo(() => {
     const { pos, hasChild } = layout;
     const { map: actions, isMerge, mergeFan } = nodeActions;
-    const rfNodes = allNodes.map((n) => {
+    const rfNodes = view.nodes.map((n) => {
       const acts = actions.get(n.id);
       return {
       id: n.id,
@@ -1010,6 +1069,16 @@ export default function App() {
         pending: n.pending,
         onTogglePin: togglePin,
         onToggleArchive: toggleArchive,
+        // Consolidate: a node folds/unfolds the long runs below it, the header
+        // does the whole tree, and a folded "+N turns" card unfolds its run.
+        collapsed: n.kind === "summary" ? treeFolded(n.rootId) : collapsedIds.has(n.id),
+        canCollapse:
+          n.kind === "summary"
+            ? [...view.anchors.values()].some((a) => a.rootId === n.rootId)
+            : view.anchors.has(n.id),
+        onToggleCollapse: n.kind === "summary" ? toggleTreeFold : toggleFold,
+        count: n.count,
+        anchorId: n.anchorId,
         // A finding card carries the finding it holds; selecting it opens the
         // finding in the inspector, where a reply forks the review to work on it.
         finding: n.finding,
@@ -1042,7 +1111,7 @@ export default function App() {
       selected: n.id === selectedId,
     };
     });
-    const rfEdges = allNodes
+    const rfEdges = view.nodes
       .filter((n) => n.parentId)
       .map((n) => ({
         id: `${n.parentId}->${n.id}`,
@@ -1059,7 +1128,7 @@ export default function App() {
     // "gather" edges from the OTHER branches' leaves into it, so the fan visibly
     // converges. The merge sits below the branch leaf it forked from (see
     // mergeBranches — the middle one, for a centered gather).
-    for (const n of allNodes) {
+    for (const n of view.nodes) {
       if (!isMerge(n) || !n.parentId) continue;
       const fan = mergeFan(n);
       if (!fan) continue;
@@ -1076,7 +1145,7 @@ export default function App() {
       }
     }
     return { rfNodes, rfEdges };
-  }, [allNodes, layout, nodeActions, selectedId, inViewId, onAnswer, forkFrom, toggleSplit, togglePin, toggleArchive, handleSpinUp, handleMerge, dims, readyIds]);
+  }, [view, collapsedIds, toggleFold, treeFolded, toggleTreeFold, layout, nodeActions, selectedId, inViewId, onAnswer, forkFrom, toggleSplit, togglePin, toggleArchive, handleSpinUp, handleMerge, dims, readyIds]);
 
   // Camera: frame the canvas once, on the initial load, via ReactFlow's own
   // `fitView` prop — and then never move it automatically again. Every automatic
@@ -1514,7 +1583,10 @@ export default function App() {
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onInit={(inst) => (rfRef.current = inst)}
-          onNodeClick={(_, n) => !n.id.startsWith("summary-") && setSelectedId(n.id)}
+          onNodeClick={(_, n) => {
+            if (n.id.startsWith("chain-")) toggleFold(n.data.anchorId);
+            else if (!n.id.startsWith("summary-")) setSelectedId(n.id);
+          }}
           onPaneClick={() => {
             setSelectedId(null);
             setComposingNew(false);

@@ -185,7 +185,8 @@ body {
   gap: 2px;
 }
 .pinBtn,
-.archiveBtn {
+.archiveBtn,
+.collapseBtn {
   border: none;
   background: transparent;
   cursor: pointer;
@@ -204,15 +205,18 @@ body {
   transition: opacity 0.12s, filter 0.12s;
 }
 .summaryCard:hover .pinBtn,
-.summaryCard:hover .archiveBtn {
+.summaryCard:hover .archiveBtn,
+.summaryCard:hover .collapseBtn {
   opacity: 0.7;
 }
-.pinBtn.on {
+.pinBtn.on,
+.collapseBtn.on {
   opacity: 1;
   filter: none;
 }
 .pinBtn:hover,
-.archiveBtn:hover {
+.archiveBtn:hover,
+.collapseBtn:hover {
   opacity: 1;
   background: rgba(255, 255, 255, 0.18);
 }
@@ -230,6 +234,33 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* A folded run of turns in a consolidated tree — a slim, dashed stand-in that
+   reads as "more here", not a turn of its own. */
+.chainCard {
+  width: 220px;
+  background: var(--card-solid);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chainCard:hover {
+  border-color: var(--accent);
+}
+.chainCount {
+  font-weight: 700;
+  color: var(--accent);
+}
+.chainLabel {
+  opacity: 0.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* a review finding pulled out of a reply into its own node: it holds the
    finding's explanation and is a real conversation once you reply to it */
 .findingCard {

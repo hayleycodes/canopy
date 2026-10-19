@@ -14,7 +14,7 @@ function fmtTokens(n) {
 // requests surface here as Allow/Deny. The ⑂ button branches a new child off
 // this node — do it on a node that already has children to split the tree.
 export default function NodeCard({ data, selected }) {
-  const { id, label, result, streaming, stopping, perms = [], canFork, onFork, onAnswer, kind, highlighted, ready, errorPaste, tokens, finding, canSplit, split, onSplit, canSpinUp, spinCount, onSpinUp, canMerge, mergeCount, onMerge, isMerge, rootId, pinned, pending, onTogglePin, onToggleArchive } = data;
+  const { id, label, result, streaming, stopping, perms = [], canFork, onFork, onAnswer, kind, highlighted, ready, errorPaste, tokens, finding, canSplit, split, onSplit, canSpinUp, spinCount, onSpinUp, canMerge, mergeCount, onMerge, isMerge, rootId, pinned, pending, onTogglePin, onToggleArchive, collapsed, canCollapse, onToggleCollapse, count } = data;
 
   // The file chip on a finding card copies its path on click (see below). A brief
   // "copied" flip gives feedback without stealing the click from the card.
@@ -39,6 +39,18 @@ export default function NodeCard({ data, selected }) {
       <div className={`summaryCard${pinned ? " pinned" : ""}`}>
         {!pending && (
           <div className="summaryActions nodrag">
+            {(canCollapse || collapsed) && (
+              <button
+                className={`collapseBtn${collapsed ? " on" : ""}`}
+                title={collapsed ? "Expand — show every turn in this conversation" : "Consolidate — fold long runs of turns into one card"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleCollapse?.(rootId);
+                }}
+              >
+                ↕
+              </button>
+            )}
             <button
               className={`pinBtn${pinned ? " on" : ""}`}
               title={pinned ? "Unpin — let this conversation scroll off when it gets old" : "Pin — keep this conversation on the canvas"}
@@ -63,6 +75,19 @@ export default function NodeCard({ data, selected }) {
         )}
         <div className="summaryEyebrow">{pinned ? "PINNED" : "TREE"}</div>
         <div className="summaryText">{label}</div>
+        <Handle type="source" position={Position.Bottom} />
+      </div>
+    );
+  }
+
+  // A run of turns folded away by consolidating the tree (see collapse.js).
+  // Clicking it expands the tree again (handled by the canvas's onNodeClick).
+  if (kind === "chain") {
+    return (
+      <div className="chainCard" title={`${count} turns folded — click to expand`}>
+        <Handle type="target" position={Position.Top} />
+        <span className="chainCount">⋮ {count} turns</span>
+        <span className="chainLabel">{label}</span>
         <Handle type="source" position={Position.Bottom} />
       </div>
     );
@@ -136,7 +161,7 @@ export default function NodeCard({ data, selected }) {
         )}
       </div>
 
-      {(canSplit || canSpinUp || canMerge || canFork) && (
+      {(canSplit || canSpinUp || canMerge || canFork || canCollapse || collapsed) && (
         <div className="nodeTools nodrag">
           {canSpinUp && (
             <button
@@ -172,6 +197,18 @@ export default function NodeCard({ data, selected }) {
               }}
             >
               {split ? "⤺ merge" : "⑃ split"}
+            </button>
+          )}
+          {(canCollapse || collapsed) && (
+            <button
+              className="splitBtn"
+              title={collapsed ? "Unfold — show the turns below this one" : "Fold — collapse the turns below this one into a single card"}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleCollapse(id);
+              }}
+            >
+              {collapsed ? "↕ unfold" : "↕ fold"}
             </button>
           )}
           {canFork && (
