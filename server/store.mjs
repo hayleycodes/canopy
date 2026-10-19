@@ -148,7 +148,9 @@ function parseSession(path, id) {
     }
     if (d.type === "ai-title" && d.aiTitle) title = d.aiTitle;
     if ((d.type === "user" || d.type === "assistant") && d.uuid && !d.isSidechain) {
-      const msg = { uuid: d.uuid, role: d.type, text: textOf(d.message), usage: d.message?.usage || null };
+      // isMeta marks harness-injected "user" turns (e.g. a Skill's loaded
+      // SKILL.md) — never the human's prompt.
+      const msg = { uuid: d.uuid, role: d.type, text: textOf(d.message), usage: d.message?.usage || null, isMeta: !!d.isMeta };
       msgs.push(msg);
       const content = d.message?.content;
       if (Array.isArray(content)) {
@@ -340,10 +342,10 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     // the first user message carrying text at or after parentLen (a tool_result
     // turn is role "user" but has no text). A no-op for healthy forks, whose tail
     // already opens on the human's prompt.
-    const rel = s.msgs.slice(s.parentLen).findIndex((m) => m.role === "user" && m.text.trim());
+    const rel = s.msgs.slice(s.parentLen).findIndex((m) => m.role === "user" && !m.isMeta && m.text.trim());
     const start = rel === -1 ? s.parentLen : s.parentLen + rel;
     const tail = s.msgs.slice(start);
-    const prompt = tail.find((m) => m.role === "user")?.text || "";
+    const prompt = tail.find((m) => m.role === "user" && !m.isMeta)?.text || "";
     // A turn with tool calls writes several assistant messages (narrate, call a
     // tool, narrate again); join them all so the persisted node matches what
     // streamed live, rather than collapsing to just the final block.
