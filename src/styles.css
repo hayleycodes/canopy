@@ -232,6 +232,11 @@ body {
   font-weight: 600;
   line-height: 1.3;
   overflow-wrap: anywhere;
+  /* the tree is titled by its first prompt, which can be a whole pasted error */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* A folded run of turns in a consolidated tree — a slim, dashed stand-in that
