@@ -1597,7 +1597,16 @@ export default function App() {
           proOptions={{ hideAttribution: true }}
         >
           <Background gap={24} color="#CDC1FF" />
-          <MiniMap pannable zoomable nodeColor="#6E9E5B" maskColor="rgba(221,230,207,0.6)" />
+          <MiniMap
+            pannable
+            zoomable
+            // Red: blocked on a permission prompt / question. Yellow: finished
+            // while you were elsewhere.
+            nodeColor={(n) =>
+              n.data?.perms?.length ? "#D64545" : n.data?.ready ? "#E8B923" : "#6E9E5B"
+            }
+            maskColor="rgba(221,230,207,0.6)"
+          />
           <Controls />
         </ReactFlow>
       </div>
