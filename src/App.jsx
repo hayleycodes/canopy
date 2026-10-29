@@ -219,6 +219,9 @@ export default function App() {
   // passively (a badge on the card + a toast) instead of yanking selection over.
   const [readyIds, setReadyIds] = useState(() => new Set());
   const [toasts, setToasts] = useState([]); // [{ id, nodeId, label }]
+  // Permission/question toasts you've ✕'d, by requestId (the rest are derived
+  // from pendings, so they clear themselves once answered).
+  const [dismissedPerms, setDismissedPerms] = useState(() => new Set());
   // Permission mode is per conversation, keyed by root id — each tree remembers
   // its own. `newRootMode` is the choice for the next fresh conversation.
   // Claude Code's own permission modes: default | acceptEdits | plan | auto.
@@ -686,6 +689,12 @@ export default function App() {
   const dismissToast = useCallback((tid) => {
     setToasts((ts) => ts.filter((x) => x.id !== tid));
   }, []);
+  // A turn you're not looking at is blocked on a permission prompt / question.
+  const attention = pendings.flatMap((p) =>
+    p.tempId === selectedId
+      ? []
+      : p.perms.filter((perm) => !dismissedPerms.has(perm.requestId)).map((perm) => ({ p, perm }))
+  );
 
   // Answer a permission prompt (requestId is globally unique) and drop it from
   // whichever pending node raised it. An answered AskUserQuestion isn't a gate
@@ -1913,8 +1922,28 @@ export default function App() {
         </>
       )}
 
-      {toasts.length > 0 && (
+      {(toasts.length > 0 || attention.length > 0) && (
         <div className="toasts">
+          {attention.map(({ p, perm }) => (
+            <button key={perm.requestId} className="toast attention" onClick={() => setSelectedId(p.tempId)}>
+              <span className="toastIco">✋</span>
+              <span className="toastText">
+                {perm.tool_name === "AskUserQuestion" ? "Question" : "Needs permission"} —{" "}
+                <span className="toastLabel">{p.label}</span>
+              </span>
+              <span
+                className="toastClose"
+                role="button"
+                title="Dismiss"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDismissedPerms((s) => new Set(s).add(perm.requestId));
+                }}
+              >
+                ✕
+              </span>
+            </button>
+          ))}
           {toasts.map((t) => (
             <button key={t.id} className="toast" onClick={() => openToast(t)}>
               <span className="toastIco">🌿</span>

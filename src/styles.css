@@ -1482,6 +1482,15 @@ button.stopBtn:disabled {
 .toast:hover {
   box-shadow: 0 6px 20px rgba(79, 122, 63, 0.32);
 }
+/* Blocked on a permission prompt / question — matches the minimap's red. */
+.toast.attention {
+  background: var(--error-bg);
+  border-color: #D64545;
+  box-shadow: 0 4px 16px rgba(214, 69, 69, 0.25);
+}
+.toast.attention:hover {
+  box-shadow: 0 6px 20px rgba(214, 69, 69, 0.35);
+}
 @keyframes toastIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
