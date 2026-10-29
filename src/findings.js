@@ -91,10 +91,10 @@ function trimClosingSummary(block) {
 // Group a reply into items, one per line matching `startRe`. Each item runs from
 // its marker line up to the next, so a finding's continuation lines (details,
 // code refs) come with it.
-function collectItems(lines, startRe) {
+function collectItems(lines, startRe, isStart = (l) => startRe.test(l)) {
   const starts = [];
   for (let i = 0; i < lines.length; i++) {
-    if (startRe.test(lines[i])) starts.push(i);
+    if (isStart(lines[i])) starts.push(i);
   }
   const items = [];
   for (let s = 0; s < starts.length; s++) {
@@ -127,8 +127,24 @@ export function findingItems(text) {
   const lines = (text || "").split(/\r?\n/);
   const explicit = collectItems(lines, FINDING_HEADING);
   if (explicit.length) return explicit;
-  const numbered = collectItems(lines, ITEM_START);
+  const numbered = collectItems(lines, ITEM_START, sameStyleAsFirst(lines));
   return numbered.length >= 2 ? numbered : [];
+}
+
+// How a numbered marker is dressed: as a heading ("### 4."), bolded ("**4.**"),
+// or plain ("4."). A finding often nests its own numbered steps ("To reproduce:
+// 1. … 2. …"); those are plain while the findings themselves are headings or
+// bold, so only markers dressed like the first one count as findings.
+function markerStyle(line) {
+  const prefix = line.slice(0, line.search(/\d/));
+  if (/#/.test(prefix)) return "heading";
+  if (/\*\*/.test(prefix)) return "bold";
+  return "plain";
+}
+function sameStyleAsFirst(lines) {
+  const first = lines.find((l) => ITEM_START.test(l));
+  const style = first && markerStyle(first);
+  return (l) => ITEM_START.test(l) && markerStyle(l) === style;
 }
 
 // True when the reply uses our explicit finding headings — unambiguous, so it

@@ -359,3 +359,31 @@ test("a review whose prose says 'parallel' still splits, not fans out", () => {
   assert.equal(fanoutItems(review).length, 0);
   assert.equal(parseFindings(review).length, 3);
 });
+
+test("nested numbered steps inside a heading finding don't become findings", () => {
+  const text = `Verified each finding.
+
+#### 1. Row reads back wrong
+
+\`services/api/a.ts:10\`
+
+**To reproduce:**
+
+1. Call updateEmployerDetails with { employerId, name }.
+2. Read the row back.
+
+#### 2. Confusing error when moving a head office
+
+\`services/api/b.ts:41\`
+
+**To reproduce:**
+
+1. Seed two directory employers, A and B.
+2. Call updateEmployerDetails on B.
+3. It's rejected.
+`;
+  const items = parseFindings(text);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].headline, "Row reads back wrong");
+  assert.match(items[1].body, /3\. It's rejected/);
+});
