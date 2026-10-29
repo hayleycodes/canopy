@@ -1370,6 +1370,14 @@ button.stopBtn:disabled {
   border: 1px solid var(--border);
   padding: 3px 7px;
 }
+/* The bubble's `overflow-wrap: anywhere` counts every character as a break
+   point when sizing columns, so short columns collapse to one letter wide.
+   `break-word` still wraps long tokens but keeps words whole for sizing. */
+.md th,
+.md td,
+.md td code {
+  overflow-wrap: break-word;
+}
 /* inspector resume field */
 .resume {
   margin-top: 16px;
