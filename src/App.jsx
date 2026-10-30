@@ -5,7 +5,7 @@ import { formatRelative } from "date-fns";
 import { enUS } from "date-fns/locale";
 
 import NodeCard from "./NodeCard.jsx";
-import ModeSelect, { MODES } from "./ModeSelect.jsx";
+import ModeSelect, { MODES, useDismiss } from "./ModeSelect.jsx";
 import PermPrompt, { ResolvedQuestions } from "./PermPrompt.jsx";
 import Markdown from "./Markdown.jsx";
 import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.jsx";
@@ -241,6 +241,9 @@ export default function App() {
   const [workspace, setWorkspace] = useState(() => getWorkspace());
   const [recent, setRecent] = useState([]); // recently-opened repos, for the switcher
   const [switching, setSwitching] = useState(false); // repo switcher panel open
+  const switchRef = useRef(null);
+  const closeSwitcher = useCallback(() => setSwitching(false), []);
+  useDismiss(switchRef, switching, closeSwitcher);
   // React Flow measures each node's size with a ResizeObserver and keeps it in
   // its OWN store — but it drops those dimensions every time the `nodes` prop is
   // rebuilt (see createNodeInternals). Since we rebuild `rfNodes` on every token,
@@ -1505,7 +1508,7 @@ export default function App() {
           {empty ? "Seed a root to grow the tree" : "Select a node, then fork from it"}
         </div>
         {workspace && (
-          <div className="workspace-switch">
+          <div className="workspace-switch" ref={switchRef}>
             <button
               className="workspace"
               title={`This tab runs in ${workspace} — click to switch repo`}

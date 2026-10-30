@@ -8,6 +8,24 @@ export const MODES = [
   { value: "auto", label: "Auto", desc: "Approve safe actions, pause for risky", icon: "⚡" },
 ];
 
+// Close a dropdown when you click or tab anywhere outside `ref`. Listens in the
+// capture phase: the canvas's pan/zoom handler stops mousedown propagating, so a
+// bubbling listener never hears clicks on the map.
+export function useDismiss(ref, open, onClose) {
+  useEffect(() => {
+    if (!open) return;
+    const onOutside = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    };
+    document.addEventListener("pointerdown", onOutside, true);
+    document.addEventListener("focusin", onOutside);
+    return () => {
+      document.removeEventListener("pointerdown", onOutside, true);
+      document.removeEventListener("focusin", onOutside);
+    };
+  }, [ref, open, onClose]);
+}
+
 // A themed replacement for a native <select> — the OS-drawn option list can't be
 // styled, so we render our own menu (opens upward; it lives in the bottom bar).
 export default function ModeSelect({ value, onChange, title }) {
@@ -15,14 +33,7 @@ export default function ModeSelect({ value, onChange, title }) {
   const ref = useRef(null);
   const current = MODES.find((m) => m.value === value) || MODES[0];
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
+  useDismiss(ref, open, () => setOpen(false));
 
   return (
     <div className="modeSelect" ref={ref}>
