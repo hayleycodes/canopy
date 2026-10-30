@@ -1809,8 +1809,11 @@ export default function App() {
                   // The same split / spin-up / merge actions the card offers, inline
                   // in the flow where you're actually reading the reply. Skipped
                   // while streaming — the reply, and what it affords, isn't settled.
-                  const a = !n.streaming && nodeActions.map.get(n.id);
-                  if (!a || (!a.canSplit && !a.canSpinUp && !a.canMerge)) return null;
+                  const a = (!n.streaming && nodeActions.map.get(n.id)) || {};
+                  // Jump the composer back to an earlier turn so the next reply
+                  // branches from there, without hunting for its card.
+                  const canReplyHere = n.id !== selected.id && !n.streaming;
+                  if (!a.canSplit && !a.canSpinUp && !a.canMerge && !canReplyHere) return null;
                   return (
                     <div className="flowActions">
                       {a.canSpinUp && (
@@ -1826,6 +1829,11 @@ export default function App() {
                       {a.canSplit && (
                         <button className="splitBtn" onClick={() => toggleSplit(n.id)}>
                           {a.split ? "⤺ merge findings" : "⑃ split into findings"}
+                        </button>
+                      )}
+                      {canReplyHere && (
+                        <button className="replyHereBtn" onClick={() => setSelectedId(n.id)}>
+                          ↩ reply from here
                         </button>
                       )}
                     </div>

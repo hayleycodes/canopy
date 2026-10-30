@@ -1203,6 +1203,17 @@ button.stopBtn:disabled {
 .exchange:last-child {
   border-bottom: none;
 }
+.replyHereBtn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-weight: 600;
+}
+.replyHereBtn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
 .exchange.current .msg.user {
   border-color: var(--accent);
 }
