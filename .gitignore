@@ -9,3 +9,6 @@ dist/
 
 # scratch / working files
 tmp/
+
+# editor
+.vscode/settings.json
