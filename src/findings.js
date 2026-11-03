@@ -25,6 +25,13 @@ const FILE_LINE = /\b[\w./-]+\.[a-z]{1,5}:\d+/i;
 // the guesswork entirely — Claude writes the review, so we get to dictate shape.
 const FINDING_HEADING = /^\s*#{1,6}\s*Finding\s+\d+\s*[:.\-–—)]?\s+/i;
 
+// The same idea written as a bold label instead of a heading — "**Comment 1** on
+// `path` line 201", "**Finding 2:** …". Turns that rewrite a review's findings as
+// PR comments land on this shape, and it's just as unambiguous a per-item marker.
+// Swallows a trailing "on " so the file ref that follows is peeled off as usual.
+const BOLD_LABEL =
+  /^\s*(?:#{1,6}\s*)?\*\*\s*(?:Comment|Finding|Issue|Bug|Problem)\s+\d{1,3}\s*[:.]?\s*\*\*\s*(?:[:.\-–—]\s*)?(?:on\s+)?/i;
+
 // The leading marker of a numbered item: "1.", "2)". A review not written to our
 // format often numbers each finding as a *heading* ("### 1. …") or bolds the
 // number ("**1.** …"), so tolerate a leading `#` heading prefix and/or `**`.
@@ -103,13 +110,26 @@ function collectItems(lines, startRe, isStart = (l) => startRe.test(l)) {
     const to = isLast ? lines.length : starts[s + 1];
     let block = lines.slice(from, to);
     if (isLast) block = trimClosingSummary(block);
+    // Drop a trailing `---` separating this item from the next.
+    while (block.length > 1 && (block[block.length - 1].trim() === "" || HR.test(block[block.length - 1]))) block.pop();
     const firstLine = block[0].replace(startRe, "");
-    const { file, rest } = splitFileRef(firstLine);
+    let { file, rest } = splitFileRef(firstLine);
+    // "`path` line 201" — fold the spelled-out line into the file chip.
+    const lineRef = rest.match(/^\s*,?\s*lines?\s+(\d+(?:\s*[-–]\s*\d+)?)\s*[,;:]?\s*/i);
+    if (file && lineRef) {
+      if (!/:\d/.test(file)) file += ":" + lineRef[1].replace(/\s*[-–]\s*/, "-");
+      rest = rest.slice(lineRef[0].length);
+    }
+    rest = rest.replace(/^\s*[,;]\s*/, "");
+    // A label line that's only a location ("**Comment 1** on `x.ts` line 201")
+    // has no headline of its own — use the item's first line of prose instead.
+    const prose = block.slice(1).find((l) => l.trim() && !HR.test(l));
+    const headSrc = rest.trim() || (file && prose ? prose.replace(/^\s*>\s*/, "") : firstLine);
     const body = [firstLine, ...block.slice(1)].join("\n").replace(/\s+$/, "");
     items.push({
       n: items.length + 1,
       file,
-      headline: headlineFor(rest || firstLine),
+      headline: headlineFor(headSrc),
       body,
     });
   }
@@ -127,6 +147,8 @@ export function findingItems(text) {
   const lines = (text || "").split(/\r?\n/);
   const explicit = collectItems(lines, FINDING_HEADING);
   if (explicit.length) return explicit;
+  const labelled = collectItems(lines, BOLD_LABEL);
+  if (labelled.length >= 2) return labelled;
   const numbered = collectItems(lines, ITEM_START, sameStyleAsFirst(lines));
   return numbered.length >= 2 ? numbered : [];
 }
@@ -147,10 +169,11 @@ function sameStyleAsFirst(lines) {
   return (l) => ITEM_START.test(l) && markerStyle(l) === style;
 }
 
-// True when the reply uses our explicit finding headings — unambiguous, so it
-// always splits (no heuristic gate).
+// True when the reply uses our explicit finding headings (or bold "**Comment N**"
+// labels) — unambiguous, so it always splits (no heuristic gate).
 function hasExplicitFindings(text) {
-  return /^\s*#{1,6}\s*Finding\s+\d+\b/im.test(text || "");
+  return /^\s*#{1,6}\s*Finding\s+\d+\b/im.test(text || "") ||
+    (text || "").split(/\r?\n/).filter((l) => BOLD_LABEL.test(l)).length >= 2;
 }
 
 // A markdown section heading (## …) sitting *after* the numbered list starts means
