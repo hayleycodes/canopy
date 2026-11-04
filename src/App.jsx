@@ -6,6 +6,7 @@ import { enUS } from "date-fns/locale";
 
 import NodeCard from "./NodeCard.jsx";
 import ModeSelect, { MODES, useDismiss } from "./ModeSelect.jsx";
+import QuickReplies from "./QuickReplies.jsx";
 import PermPrompt, { ResolvedQuestions } from "./PermPrompt.jsx";
 import Markdown from "./Markdown.jsx";
 import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.jsx";
@@ -1904,13 +1905,16 @@ export default function App() {
                       ⚡ stop asking, approve the rest
                     </button>
                   )}
-                  <button
-                    className="stopBtn"
-                    onClick={() => stopTurn(selected.id, selected.parentId, selected.turnId, selected.sessionId)}
-                    disabled={selected.stopping}
-                  >
-                    {selected.stopping ? "■ stopping…" : "■ stop"}
-                  </button>
+                  <div className="resumeActions stopGroup">
+                    <QuickReplies onPick={setReplyText} />
+                    <button
+                      className="stopBtn"
+                      onClick={() => stopTurn(selected.id, selected.parentId, selected.turnId, selected.sessionId)}
+                      disabled={selected.stopping}
+                    >
+                      {selected.stopping ? "■ stopping…" : "■ stop"}
+                    </button>
+                  </div>
                 </>
               ) : (
                 <>
@@ -1920,6 +1924,7 @@ export default function App() {
                     title="Permission mode for this conversation"
                   />
                   <div className="resumeActions">
+                    <QuickReplies onPick={setReplyText} />
                     <AttachButton onAdd={addReplyImages} />
                     <button onClick={sendReply} disabled={!reply.trim()}>
                       Send

@@ -953,6 +953,11 @@ body {
   gap: 2px;
   z-index: 20;
 }
+.quickMenu {
+  width: 340px;
+  left: auto;
+  right: 0;
+}
 .modeItem {
   display: flex;
   align-items: flex-start;
@@ -1099,8 +1104,10 @@ button.ghost:hover {
 }
 button.stopBtn {
   background: #C4405A;
-  /* Keep stop right-aligned even when it's the only control (auto mode hides
-     the "approve the rest" button). */
+}
+/* Keep stop right-aligned even when it's the only control (auto mode hides
+   the "approve the rest" button). */
+.stopGroup {
   margin-left: auto;
 }
 button.stopBtn:hover {
