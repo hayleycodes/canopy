@@ -271,6 +271,7 @@ export default function App() {
   const replyRef = useRef(null); // inspector's composer, focused for a new conversation
   const inspectorRef = useRef(null);
   const currentRef = useRef(null); // the selected exchange in the thread
+  const skipScrollRef = useRef(false); // "reply from here" keeps your place
   const rfRef = useRef(null); // ReactFlow instance, for imperative fitView
   const nextTemp = useRef(0);
   const toastSeq = useRef(0);
@@ -668,8 +669,11 @@ export default function App() {
   // When you pick a node (e.g. click it on the canvas), scroll the inspector to
   // that node's exchange so the thread jumps to the item you selected instead of
   // leaving you wherever you'd scrolled to.
+  // Skipped for "reply from here": you clicked at the bottom of the exchange, so
+  // jumping to its top would lose your place.
   useEffect(() => {
-    currentRef.current?.scrollIntoView({ block: "start" });
+    if (skipScrollRef.current) skipScrollRef.current = false;
+    else currentRef.current?.scrollIntoView({ block: "start" });
     setInViewId(selectedId);
   }, [selectedId]);
 
@@ -1849,7 +1853,13 @@ export default function App() {
                         </button>
                       )}
                       {canReplyHere && (
-                        <button className="replyHereBtn" onClick={() => setSelectedId(n.id)}>
+                        <button
+                          className="replyHereBtn"
+                          onClick={() => {
+                            skipScrollRef.current = true;
+                            setSelectedId(n.id);
+                          }}
+                        >
                           ↩ reply from here
                         </button>
                       )}
