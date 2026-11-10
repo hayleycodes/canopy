@@ -92,6 +92,7 @@ function buildSegments(tail) {
   for (const m of tail) {
     if (m.role === "assistant" && m.text) pushText(m.text);
     if (m.questions?.length) segs.push({ type: "questions", items: m.questions });
+    for (const r of m.redirects || []) segs.push({ type: "redirect", ...r });
   }
   return segs;
 }
@@ -107,6 +108,10 @@ function parseAnswersText(text) {
   while ((m = re.exec(text))) map[m[1]] = m[2];
   return map;
 }
+
+// Prefix of the deny message index.mjs sends when the human redirects Claude
+// from a permission prompt — how we spot that redirect again in the transcript.
+export const REDIRECT_PREFIX = "The user denied this tool use and wants you to do this instead: ";
 
 // Token usage for a node's own turn (the tail after its parent's shared prefix).
 // `context` is the whole prompt the model saw on this turn's LAST response —
@@ -131,6 +136,8 @@ function parseSession(path, id) {
   // The answer lands in a later tool_result, so we attach the resolved Q&A back
   // onto the assistant message that asked it (so it belongs to that turn).
   const openAsks = new Map();
+  // Every tool_use's name by id, so a redirected deny can say which tool it stopped.
+  const toolNames = new Map();
   let title = null;
   let firstTs = null;
   let lastTs = null;
@@ -155,6 +162,17 @@ function parseSession(path, id) {
       const content = d.message?.content;
       if (Array.isArray(content)) {
         for (const b of content) {
+          if (b.type === "tool_use") toolNames.set(b.id, b.name);
+          if (b.type === "tool_result") {
+            const t = toolResultText(b);
+            const at = t.indexOf(REDIRECT_PREFIX);
+            if (at !== -1) {
+              msg.redirects = (msg.redirects || []).concat({
+                tool_name: toolNames.get(b.tool_use_id) || "",
+                text: t.slice(at + REDIRECT_PREFIX.length),
+              });
+            }
+          }
           if (b.type === "tool_use" && b.name === "AskUserQuestion") {
             openAsks.set(b.id, { questions: b.input?.questions || [], msg });
           } else if (b.type === "tool_result" && b.tool_use_id && openAsks.has(b.tool_use_id)) {
@@ -377,7 +395,7 @@ export function loadWorkspaceGraph(workspace, limit = 5, links = new Map(), pinn
     // interleaved where they actually happened (narrate → ask/answer → narrate),
     // so the resolved Q&A reads inline instead of tacked onto the end. Only set
     // when the turn raised a question; plain turns keep rendering from `result`.
-    const segments = tail.some((m) => m.questions?.length) ? buildSegments(tail) : undefined;
+    const segments = tail.some((m) => m.questions?.length || m.redirects?.length) ? buildSegments(tail) : undefined;
     return {
       id: s.id,
       parentId: s.parentId,

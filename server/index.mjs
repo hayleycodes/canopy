@@ -23,7 +23,7 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { runStream, sweepStaleConfigs } from "./engine.mjs";
 import { addNode, getNode, snapshot, reset } from "./graph.mjs";
-import { loadWorkspaceGraph, sessionExists, attachSummaries } from "./store.mjs";
+import { loadWorkspaceGraph, sessionExists, attachSummaries, REDIRECT_PREFIX } from "./store.mjs";
 import { loadLinks, recordLink } from "./lineage.mjs";
 import { loadPins, setPin } from "./pins.mjs";
 import { loadArchived, setArchived } from "./archive.mjs";
@@ -328,7 +328,7 @@ async function handleStream(req, res, url) {
 
     // Only carry segments when the turn actually raised a question; plain turns
     // render from `result` (matches store.mjs), so we don't change their display.
-    const hadQuestions = segments.some((x) => x.type === "questions");
+    const hadQuestions = segments.some((x) => x.type !== "text");
     const node = addNode(workspace, {
       sessionId: final.session_id,
       parentId,
@@ -352,7 +352,7 @@ async function handleStream(req, res, url) {
     // so a live stop swaps the pending for the partial instead of losing it.
     // A turn stopped before it even emitted a session id has nothing to keep.
     if (ac.signal.aborted && sessionId) {
-      const hadQuestions = segments.some((x) => x.type === "questions");
+      const hadQuestions = segments.some((x) => x.type !== "text");
       const node = addNode(workspace, {
         sessionId,
         parentId,
@@ -409,7 +409,7 @@ async function handlePermissionAsk(req, res) {
 
 // POST /api/permission/answer — the UI's Allow/Deny click lands here.
 async function handlePermissionAnswer(req, res) {
-  const { requestId, behavior, updatedInput } = await readBody(req);
+  const { requestId, behavior, updatedInput, message } = await readBody(req);
   const pend = pendingPerms.get(requestId);
   if (pend) {
     pendingPerms.delete(requestId);
@@ -426,10 +426,15 @@ async function handlePermissionAnswer(req, res) {
       const segs = turnSegments.get(pend.turnId);
       if (segs) segs.push({ type: "questions", items });
     }
+    // Same for a redirect: show what you told Claude at the point it heard it.
+    if (behavior === "deny" && message) {
+      const segs = turnSegments.get(pend.turnId);
+      if (segs) segs.push({ type: "redirect", tool_name: pend.tool_name, text: message });
+    }
     pend.resolve(
       behavior === "allow"
         ? { behavior: "allow", updatedInput: updatedInput ?? pend.input ?? {} }
-        : { behavior: "deny", message: "Denied in Canopy" }
+        : { behavior: "deny", message: message ? REDIRECT_PREFIX + message : "Denied in Canopy" }
     );
   }
   sendJson(res, 200, { ok: true });

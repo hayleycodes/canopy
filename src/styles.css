@@ -827,6 +827,9 @@ body {
   color: #33281B;
   resize: vertical;
 }
+.permFeedback {
+  margin: 6px 0;
+}
 .questionOther:focus {
   outline: none;
   border-color: #4F7A3F;

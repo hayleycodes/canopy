@@ -186,23 +186,54 @@ export function ResolvedQuestions({ questions = [] }) {
   );
 }
 
+// A permission prompt you denied with "do this instead" — the tool it stopped and
+// what you told Claude, shown inline where the turn picked it up.
+export function ResolvedRedirect({ toolName, text }) {
+  return (
+    <div className="askResolved">
+      <div className="askItem">
+        <div className="askHeader">Redirected</div>
+        <div className="askQuestion">Denied {toolName || "tool use"} — you said:</div>
+        <div className="askAnswer">{text}</div>
+      </div>
+    </div>
+  );
+}
+
 export default function PermPrompt({ perm, onAnswer }) {
   const { requestId, tool_name, input } = perm;
+  // Optional redirect: denying with text hands it back to Claude as the reason,
+  // so the turn carries on in the direction you gave instead of just stopping.
+  const [feedback, setFeedback] = useState("");
   if (tool_name === "AskUserQuestion") {
     return <QuestionPrompt requestId={requestId} input={input} onAnswer={onAnswer} />;
   }
+  const deny = () => onAnswer(requestId, "deny", undefined, feedback.trim() || undefined);
   return (
     <div className="perm nodrag">
       <div className="permTool">
         wants to use <b>{tool_name}</b>
       </div>
       <Preview toolName={tool_name} input={input} />
+      <textarea
+        className="questionOther permFeedback"
+        rows={1}
+        placeholder="Or tell Claude what to do instead…"
+        value={feedback}
+        onChange={(e) => setFeedback(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey && feedback.trim()) {
+            e.preventDefault();
+            deny();
+          }
+        }}
+      />
       <div className="permActions">
-        <button className="allow" onClick={() => onAnswer(requestId, "allow")}>
+        <button className="allow" disabled={!!feedback.trim()} onClick={() => onAnswer(requestId, "allow")}>
           Allow
         </button>
-        <button className="ghost" onClick={() => onAnswer(requestId, "deny")}>
-          Deny
+        <button className="ghost" onClick={deny}>
+          {feedback.trim() ? "Deny & redirect" : "Deny"}
         </button>
       </div>
     </div>

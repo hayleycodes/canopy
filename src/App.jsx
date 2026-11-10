@@ -7,7 +7,7 @@ import { enUS } from "date-fns/locale";
 import NodeCard from "./NodeCard.jsx";
 import ModeSelect, { MODES, useDismiss } from "./ModeSelect.jsx";
 import QuickReplies from "./QuickReplies.jsx";
-import PermPrompt, { ResolvedQuestions } from "./PermPrompt.jsx";
+import PermPrompt, { ResolvedQuestions, ResolvedRedirect } from "./PermPrompt.jsx";
 import Markdown from "./Markdown.jsx";
 import { AttachButton, Thumbnails, filesToImages, MAX_IMAGES } from "./Attach.jsx";
 import { layoutTree } from "./layout.js";
@@ -714,8 +714,8 @@ export default function App() {
   // that just disappears — record its picks as a segment at this point in the
   // turn so the resolved Q&A stays inline in the flow (the server persists the
   // same thing once the turn lands).
-  const onAnswer = useCallback((requestId, behavior, updatedInput) => {
-    answerPermission(requestId, behavior, updatedInput);
+  const onAnswer = useCallback((requestId, behavior, updatedInput, message) => {
+    answerPermission(requestId, behavior, updatedInput, message);
     setPendings((ps) =>
       ps.map((p) => {
         const answered = p.perms.find((q) => q.requestId === requestId);
@@ -728,6 +728,10 @@ export default function App() {
             answer: answers[q.question] || "",
           }));
           return { ...p, perms, segments: [...(p.segments || []), { type: "questions", items }] };
+        }
+        // A redirect shows inline too, so you can see where Claude heard it.
+        if (answered && behavior === "deny" && message) {
+          return { ...p, perms, segments: [...(p.segments || []), { type: "redirect", tool_name: answered.tool_name, text: message }] };
         }
         return { ...p, perms };
       })
@@ -1785,6 +1789,8 @@ export default function App() {
                           {n.segments.map((seg, i) =>
                             seg.type === "questions" ? (
                               <ResolvedQuestions key={i} questions={seg.items} />
+                            ) : seg.type === "redirect" ? (
+                              <ResolvedRedirect key={i} toolName={seg.tool_name} text={seg.text} />
                             ) : (
                               <div className="msg assistant" key={i}>
                                 <Markdown>{seg.text}</Markdown>
@@ -1794,7 +1800,7 @@ export default function App() {
                           )}
                           {/* Answered a question and Claude hasn't resumed yet — show the
                               cursor below the Q&A so the turn still reads as in-progress. */}
-                          {n.streaming && n.segments[n.segments.length - 1]?.type === "questions" && (
+                          {n.streaming && n.segments[n.segments.length - 1]?.type !== "text" && (
                             <div className="msg assistant">
                               {liveCursor}
                             </div>
