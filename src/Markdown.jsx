@@ -64,8 +64,15 @@ function codeText(node) {
 // stable module constant. A fresh `components` object each render would defeat
 // react-markdown's memoization and re-parse on every token.
 const ExternalLink = (props) => <a {...props} target="_blank" rel="noreferrer" />;
+// Tables scroll sideways in their own box: long code paths can make one wider
+// than the bubble, and without this the whole inspector scrolls instead.
+const ScrollTable = ({ node, ...props }) => (
+  <div className="tableScroll">
+    <table {...props} />
+  </div>
+);
 const REMARK_PLUGINS = [remarkGfm];
-const COMPONENTS = { a: ExternalLink, pre: CodeBlock };
+const COMPONENTS = { a: ExternalLink, pre: CodeBlock, table: ScrollTable };
 
 // Render assistant replies as markdown (bold, lists, code, links, tables). Links
 // open in a new tab; everything else is styled via `.md` in styles.css.

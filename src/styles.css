@@ -1412,9 +1412,12 @@ button.stopBtn:disabled {
   border-left: 3px solid var(--border);
   color: #6C5D47;
 }
+.md .tableScroll {
+  overflow-x: auto;
+  margin: 0 0 8px;
+}
 .md table {
   border-collapse: collapse;
-  margin: 0 0 8px;
   font-size: 12px;
 }
 .md th,
