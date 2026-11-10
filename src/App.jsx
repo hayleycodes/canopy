@@ -428,6 +428,15 @@ export default function App() {
 
   const addImagesTo = (cur, imgs) => ({ ...cur, images: [...cur.images, ...imgs].slice(0, MAX_IMAGES) });
   const setReplyText = (text) => patchDraft(setReplyDrafts, replyKey, { text });
+  // Fill the composer, then focus it with the caret at the end once the text renders.
+  const pickQuickReply = (text) => {
+    setReplyText(text);
+    requestAnimationFrame(() => {
+      const el = replyRef.current;
+      el?.focus();
+      el?.setSelectionRange(text.length, text.length);
+    });
+  };
   const addReplyImages = (imgs) => patchDraft(setReplyDrafts, replyKey, (d) => addImagesTo(d, imgs));
   const removeReplyImage = (imgId) =>
     patchDraft(setReplyDrafts, replyKey, (d) => ({ ...d, images: d.images.filter((im) => im.id !== imgId) }));
@@ -1440,18 +1449,23 @@ export default function App() {
 
   // Inspector composer: continue the selected conversation from that node, or —
   // when the inspector is open for a new conversation — seed a fresh root.
-  const sendReply = useCallback(() => {
+  // Send `text` from the composer's context; returns false when there's nowhere to send.
+  const sendText = useCallback((text, images) => {
     if (selected?.kind === "finding") {
       // The review session already holds the whole review (this finding included),
       // so forking it and naming the finding scopes the new branch to it. Put the
       // reference last so the node's label reads as what you actually typed.
-      const scoped = `${reply}\n\n(Re: your review finding — ${selected.finding.headline})`;
-      startTurn(selected.reviewId, scoped, replyImages, { displayParentId: selected.id });
-    } else if (selectedId) startTurn(selectedId, reply, replyImages);
-    else if (composingNew) startTurn(null, reply, replyImages);
-    else return;
-    clearDraft(setReplyDrafts, replyKey);
-  }, [startTurn, selected, selectedId, composingNew, reply, replyImages, replyKey, clearDraft]);
+      const scoped = `${text}\n\n(Re: your review finding — ${selected.finding.headline})`;
+      startTurn(selected.reviewId, scoped, images, { displayParentId: selected.id });
+    } else if (selectedId) startTurn(selectedId, text, images);
+    else if (composingNew) startTurn(null, text, images);
+    else return false;
+    return true;
+  }, [startTurn, selected, selectedId, composingNew]);
+
+  const sendReply = useCallback(() => {
+    if (sendText(reply, replyImages)) clearDraft(setReplyDrafts, replyKey);
+  }, [sendText, reply, replyImages, replyKey, clearDraft]);
 
   const onReset = useCallback(async () => {
     // Stop every in-flight turn (closes its stream, kills the CLI child) before
@@ -1528,13 +1542,6 @@ export default function App() {
           </div>
         )}
         <button onClick={newConversation}>＋ new conversation</button>
-        <button
-          className="ghost"
-          onClick={() => startTurn(null, "Look at my PRs and linear cards. what is the state of things?", [])}
-          title="Start a conversation asking for the state of your PRs and Linear cards"
-        >
-          📋 status check
-        </button>
         <button className="ghost" onClick={onTidy} disabled={empty} title="Re-pack the trees so they stop overlapping">
           🧹 tidy
         </button>
@@ -1906,7 +1913,7 @@ export default function App() {
                     </button>
                   )}
                   <div className="resumeActions stopGroup">
-                    <QuickReplies onPick={setReplyText} />
+                    <QuickReplies onPick={pickQuickReply} />
                     <button
                       className="stopBtn"
                       onClick={() => stopTurn(selected.id, selected.parentId, selected.turnId, selected.sessionId)}
@@ -1924,7 +1931,7 @@ export default function App() {
                     title="Permission mode for this conversation"
                   />
                   <div className="resumeActions">
-                    <QuickReplies onPick={setReplyText} />
+                    <QuickReplies onPick={pickQuickReply} onSend={(text) => sendText(text, [])} />
                     <AttachButton onAdd={addReplyImages} />
                     <button onClick={sendReply} disabled={!reply.trim()}>
                       Send

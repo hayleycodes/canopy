@@ -958,6 +958,33 @@ body {
   left: auto;
   right: 0;
 }
+.quickMenu.below {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+.quickRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.quickSend {
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--accent);
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.quickSend:hover:not(:disabled) {
+  background: #ECF1E2;
+}
+.quickSend:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: default;
+}
+.quickMenu .modeItemLabel {
+  font-weight: 400;
+}
 .modeItem {
   display: flex;
   align-items: flex-start;
@@ -1071,8 +1098,12 @@ body {
 }
 .resumeActions {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 8px;
+}
+/* Let the quick-replies trigger fill the row height so it matches its neighbours. */
+.resumeActions .modeSelect {
+  display: flex;
 }
 
 /* buttons */
